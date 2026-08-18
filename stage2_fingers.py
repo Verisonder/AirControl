@@ -22,7 +22,7 @@ import hands as H
 def main() -> int:
     ap = argparse.ArgumentParser(description="Finger reading")
     ap.add_argument("--camera", type=int, default=0)
-    ap.add_argument("--hands", type=int, default=1)
+    ap.add_argument("--hands", type=int, default=2, help="how many hands to track")
     ap.add_argument("--no-mirror", action="store_true")
     args = ap.parse_args()
 

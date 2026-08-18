@@ -68,7 +68,7 @@ def draw_hand(frame, landmarks) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Hand tracking preview")
     ap.add_argument("--camera", type=int, default=0, help="camera index (try 1 if 0 is wrong)")
-    ap.add_argument("--hands", type=int, default=1, help="how many hands to track")
+    ap.add_argument("--hands", type=int, default=2, help="how many hands to track")
     ap.add_argument("--no-mirror", action="store_true", help="do not flip the image")
     args = ap.parse_args()
 
