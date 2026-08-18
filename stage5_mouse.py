@@ -1,21 +1,24 @@
 """
-Stage 5 - move the mouse with your hand.
+Stage 5 - move the mouse with your hand, using poses you recorded yourself.
 
-  open hand      the cursor follows your palm
-  close it       the left button goes down
-  open again     the button comes back up
+Record two gestures first, in stage3_record.py:
 
-So a quick close-and-open is a click, and closing then moving is a drag.
+  one bound to "move cursor"   the cursor follows this hand while you hold it
+  one bound to "left click"    the left button is down while you hold it
 
-The pointer follows the middle knuckle rather than a fingertip, because that
-point barely moves when you make a fist - a fingertip would drag the cursor
-sideways every time you tried to click.
+Optionally a third bound to "right click".
+
+Holding the click pose briefly is a click. Holding it while you move is a drag.
+
+The cursor follows the middle knuckle rather than a fingertip, because that
+point barely shifts as the hand changes shape - a fingertip would drag the
+cursor sideways every time you clicked.
 
 Only the middle of the frame is used, so a small hand movement covers the whole
-screen and you never have to reach the edge of the camera's view.
+screen. The box is drawn on the preview.
 
 Keys
-  P       pause (cursor released, nothing tracked)
+  P       pause (button released, nothing tracked)
   Esc/q   quit
 """
 
@@ -25,12 +28,14 @@ import time
 
 import cv2
 
+import actions
+import gestures
 import hands as H
 
 try:
     import pyautogui
     pyautogui.FAILSAFE = False      # we have our own pause and quit
-    pyautogui.PAUSE = 0             # no built-in delay between calls
+    pyautogui.PAUSE = 0
 except ImportError:
     print("pyautogui is needed for this. Install it with:", file=sys.stderr)
     print("    pip install pyautogui", file=sys.stderr)
@@ -42,27 +47,23 @@ PALM = 9        # middle finger knuckle - steady whether the hand is open or shu
 class Pointer:
     """Turns a hand position into a smoothed screen position."""
 
-    def __init__(self, margin: float = 0.2, smoothing: float = 0.35):
+    def __init__(self, margin: float = 0.33, smoothing: float = 0.35):
         self.w, self.h = pyautogui.size()
-        self.margin = margin            # fraction of the frame ignored at each edge
-        self.smoothing = smoothing      # 0 is frozen, 1 is no smoothing at all
+        self.margin = margin
+        self.smoothing = smoothing
         self.x = self.w / 2
         self.y = self.h / 2
         self.have_fix = False
 
     def update(self, nx: float, ny: float):
-        """Feed a normalised hand position (0-1). Returns screen pixels."""
         span = 1.0 - 2 * self.margin
-
-        # Map the active middle of the frame onto the whole screen
         fx = (nx - self.margin) / span
         fy = (ny - self.margin) / span
         tx = min(max(fx, 0.0), 1.0) * self.w
         ty = min(max(fy, 0.0), 1.0) * self.h
 
         if not self.have_fix:
-            # Jump straight there the first time rather than sliding across
-            self.x, self.y = tx, ty
+            self.x, self.y = tx, ty          # jump on first sight, do not slide
             self.have_fix = True
         else:
             self.x += (tx - self.x) * self.smoothing
@@ -75,19 +76,42 @@ class Pointer:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Mouse control")
+    ap = argparse.ArgumentParser(description="Mouse control from recorded poses")
     ap.add_argument("--camera", type=int, default=0)
     ap.add_argument("--no-mirror", action="store_true")
-    ap.add_argument("--margin", type=float, default=0.2,
-                    help="fraction of the frame ignored at each edge (bigger = less hand movement needed)")
+    ap.add_argument("--margin", type=float, default=0.33,
+                    help="fraction of the frame ignored at each edge (bigger = smaller box)")
     ap.add_argument("--smoothing", type=float, default=0.35,
                     help="0 to 1, lower is steadier but laggier")
-    ap.add_argument("--grip", type=int, default=1,
-                    help="fingers still up that still counts as a closed hand")
+    ap.add_argument("--tolerance", type=float, default=gestures.DEFAULT_TOLERANCE)
     ap.add_argument("--frames", type=int, default=3,
-                    help="frames the hand must stay closed or open before the button changes")
+                    help="frames a pose must hold before the button changes")
     ap.add_argument("--dry-run", action="store_true", help="show it working without touching the mouse")
     args = ap.parse_args()
+
+    lib = gestures.Library()
+    bound = {g.get("action") for g in lib.items}
+
+    if "mouse:move" not in bound:
+        print("No gesture is bound to 'move cursor' yet.")
+        print()
+        print("Record one first:")
+        print("    python stage3_record.py")
+        print("Hold the pose, press SPACE, name it, then choose 'move cursor'.")
+        print("Record a second one for 'left click' while you are there.")
+        return 1
+
+    if "mouse:left" not in bound:
+        print("Note: nothing is bound to 'left click', so you can move but not click.")
+
+    names = {a: next(g["name"] for g in lib.items if g.get("action") == a)
+             for a in actions.MOUSE_ACTIONS if a in bound}
+    print("Using:")
+    for action, name in names.items():
+        print("  %-12s %s" % (actions.describe(action), name))
+    print("P pauses, Esc quits.")
+    if args.dry_run:
+        print("Dry run - the mouse will not actually move.")
 
     cam = H.open_camera(args.camera)
     pointer = Pointer(args.margin, args.smoothing)
@@ -95,25 +119,18 @@ def main() -> int:
     started = time.time()
 
     paused = False
-    button_down = False
-    closed_streak = 0
-    open_streak = 0
+    held_button = None          # "left", "right" or None
     down_since = 0.0
-    last_event = ""
-    event_until = 0.0
-
-    print("Mouse control running.")
-    print("Open hand moves the cursor, close it to press, open to release.")
-    print("P pauses, Esc quits.")
-    if args.dry_run:
-        print("Dry run - the mouse will not actually move.")
+    want = None                 # what this frame is asking for
+    streak = 0
+    last_event, event_until = "", 0.0
 
     def release():
-        nonlocal button_down
-        if button_down:
+        nonlocal held_button
+        if held_button:
             if not args.dry_run:
-                pyautogui.mouseUp()
-            button_down = False
+                pyautogui.mouseUp(button=held_button)
+            held_button = None
 
     with H.make_landmarker(1) as landmarker:
         try:
@@ -130,20 +147,9 @@ def main() -> int:
                 result = landmarker.detect_for_video(H.to_image(frame), stamp)
 
                 lines = ["fps %.0f" % fps.tick()]
+                seen_action, lm = None, None
 
-                if paused:
-                    release()
-                    pointer.lost()
-                    lines.append("PAUSED - press P")
-
-                elif not result.hand_landmarks:
-                    # Hand gone: let go rather than leaving the button stuck down
-                    release()
-                    pointer.lost()
-                    closed_streak = open_streak = 0
-                    lines.append("no hand")
-
-                else:
+                if result.hand_landmarks:
                     lm = result.hand_landmarks[0]
                     H.draw_hand(frame, lm)
 
@@ -151,51 +157,69 @@ def main() -> int:
                     if result.handedness and result.handedness[0]:
                         side = result.handedness[0][0].category_name
 
-                    up = H.fingers_up(lm, side)
-                    closed = sum(up) <= args.grip
-
-                    # A few frames of agreement before changing the button,
-                    # so a half-formed fist does not click by itself
-                    if closed:
-                        closed_streak += 1
-                        open_streak = 0
+                    hit, dist = lib.match(lm, side, args.tolerance)
+                    if hit and hit.get("action") in actions.MOUSE_ACTIONS:
+                        seen_action = hit["action"]
+                        lines.append("%s  (%.2f)" % (hit["name"], dist))
+                    elif hit:
+                        lines.append("%s - not a mouse pose" % hit["name"])
                     else:
-                        open_streak += 1
-                        closed_streak = 0
+                        lines.append("no match  (nearest %.2f)" % dist)
 
-                    if closed_streak >= args.frames and not button_down:
-                        button_down = True
-                        down_since = time.time()
+                if paused:
+                    release()
+                    pointer.lost()
+                    lines.append("PAUSED - press P")
+
+                elif lm is None:
+                    # Hand gone: let go rather than leaving the button stuck down
+                    release()
+                    pointer.lost()
+                    want, streak = None, 0
+                    lines.append("no hand")
+
+                else:
+                    # A few frames of agreement before changing the button,
+                    # so a half-formed pose does not click by itself
+                    if seen_action == want:
+                        streak += 1
+                    else:
+                        want, streak = seen_action, 1
+
+                    if streak >= args.frames:
+                        target = {"mouse:left": "left", "mouse:right": "right"}.get(want)
+
+                        if target != held_button:
+                            release()
+                            if target:
+                                held_button = target
+                                down_since = time.time()
+                                if not args.dry_run:
+                                    pyautogui.mouseDown(button=target)
+                                last_event, event_until = "%s down" % target, time.time() + 0.8
+                            elif last_event.endswith("down"):
+                                held = time.time() - down_since
+                                last_event = "click" if held < 0.4 else "drag %.1fs" % held
+                                event_until = time.time() + 0.8
+
+                    # Any recognised mouse pose moves the cursor, so a drag
+                    # does not freeze the moment the button goes down
+                    if seen_action:
+                        sx, sy = pointer.update(lm[PALM].x, lm[PALM].y)
                         if not args.dry_run:
-                            pyautogui.mouseDown()
-                        last_event, event_until = "press", time.time() + 0.8
+                            pyautogui.moveTo(sx, sy, _pause=False)
+                        lines.append("cursor %d, %d%s"
+                                     % (sx, sy, "   %s down" % held_button if held_button else ""))
+                    else:
+                        pointer.lost()
 
-                    elif open_streak >= args.frames and button_down:
-                        held = time.time() - down_since
-                        button_down = False
-                        if not args.dry_run:
-                            pyautogui.mouseUp()
-                        last_event = "click" if held < 0.4 else "drag %.1fs" % held
-                        event_until = time.time() + 0.8
-
-                    sx, sy = pointer.update(lm[PALM].x, lm[PALM].y)
-                    if not args.dry_run:
-                        pyautogui.moveTo(sx, sy, _pause=False)
-
-                    # Mark the point being followed
                     px, py = int(lm[PALM].x * w), int(lm[PALM].y * h)
-                    cv2.circle(frame, (px, py), 12, (0, 0, 255) if button_down else (255, 200, 0), 2)
-
-                    lines.append("%s   %s" % (
-                        "CLOSED" if closed else "open",
-                        "button down" if button_down else "button up",
-                    ))
-                    lines.append("cursor %d, %d" % (sx, sy))
+                    cv2.circle(frame, (px, py), 12,
+                               (0, 0, 255) if held_button else (255, 200, 0), 2)
 
                 if time.time() < event_until:
                     lines.append(last_event)
 
-                # Show the active area - hand movement outside this does nothing
                 m = args.margin
                 cv2.rectangle(
                     frame,

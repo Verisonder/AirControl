@@ -7,7 +7,13 @@ Actions are written as plain strings so they can live in gestures.json:
     hotkey:win+d           press a combination
     text:hello             type something
     run:notepad.exe        start a program
+    mouse:move             while held, the cursor follows this hand
+    mouse:left             while held, the left button is down
+    mouse:right            while held, the right button is down
     none                   do nothing (useful while testing)
+
+The mouse ones are not pressed like a key - they describe a hand pose that the
+mouse mode watches for, and they only mean anything there.
 
 Some ready-made ones are listed in PRESETS.
 """
@@ -38,7 +44,13 @@ PRESETS = {
     "close window": "hotkey:alt+f4",
     "screenshot":   "hotkey:win+shift+s",
     "lock":         "run:rundll32.exe user32.dll,LockWorkStation",
+    "move cursor":  "mouse:move",
+    "left click":   "mouse:left",
+    "right click":  "mouse:right",
 }
+
+# Actions that only mean something inside mouse mode
+MOUSE_ACTIONS = ("mouse:move", "mouse:left", "mouse:right")
 
 
 def describe(action: str) -> str:
@@ -64,6 +76,10 @@ def run(action: str) -> bool:
     kind, _, arg = action.partition(":")
     kind = kind.strip().lower()
     arg = arg.strip()
+
+    if kind == "mouse":
+        # Handled by stage5_mouse.py, which holds the pose rather than firing it
+        return False
 
     if kind == "run":
         try:
