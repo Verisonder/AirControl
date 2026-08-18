@@ -37,7 +37,60 @@ def missing() -> list:
     return out
 
 
+def log_path():
+    """Where the download log goes, somewhere always writable."""
+    from pathlib import Path
+    import os
+    if os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home()))
+    else:
+        base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    folder = base / "AirControl"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder / "setup.log"
+
+
+def pip_exe() -> str:
+    """
+    Always drive pip with python.exe, never pythonw.exe.
+
+    Under pythonw there is no console, so the standard handles are invalid.
+    pip writes to them as it works and falls over immediately, which looks like
+    a download failure but is nothing of the sort.
+    """
+    from pathlib import Path
+    exe = Path(sys.executable)
+    if exe.name.lower() == "pythonw.exe":
+        console = exe.with_name("python.exe")
+        if console.exists():
+            return str(console)
+    return sys.executable
+
+
+LAST_ERROR = ""
+
+
+def _run_pip(args, log) -> int:
+    """Run pip, sending everything to the log file rather than nowhere."""
+    global LAST_ERROR
+    try:
+        result = subprocess.run(
+            args,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0,
+        )
+        return result.returncode
+    except Exception as exc:
+        LAST_ERROR = str(exc)
+        log.write("\ncould not start pip: %s\n" % exc)
+        return 1
+
+
 def install(packages) -> bool:
+    global LAST_ERROR
+
     print("Downloading %d package(s). This takes a few minutes the first time." % len(packages))
     print("Around 400 MB in total.")
     print()
@@ -47,37 +100,36 @@ def install(packages) -> bool:
     # user cannot write to it - which fails with a permission error that has
     # nothing to do with where we are actually installing.
     base = [
-        sys.executable, "-m", "pip", "install",
+        pip_exe(), "-m", "pip", "install",
         "--no-warn-script-location",
         "--no-cache-dir",
         "--disable-pip-version-check",
     ]
 
-    try:
-        result = subprocess.run(base + list(packages))
-    except Exception as exc:
-        print("Could not start pip: %s" % exc)
-        return False
+    path = log_path()
+    with open(path, "w", encoding="utf-8", errors="replace") as log:
+        log.write("python: %s\n" % sys.executable)
+        log.write("pip via: %s\n" % pip_exe())
+        log.write("packages: %s\n\n" % ", ".join(packages))
+        log.flush()
 
-    if result.returncode == 0:
-        return True
+        code = _run_pip(base + list(packages), log)
 
-    # Second attempt into the user's own site-packages, in case the program
-    # folder itself is not writable
-    print()
-    print("That did not work. Trying again into your user folder...")
-    try:
-        result = subprocess.run(base + ["--user"] + list(packages))
-    except Exception as exc:
-        print("Could not start pip: %s" % exc)
-        return False
+        if code != 0:
+            # Second attempt into the user's own site-packages, in case the
+            # program folder itself is not writable
+            log.write("\n--- retrying with --user ---\n")
+            log.flush()
+            code = _run_pip(base + ["--user"] + list(packages), log)
 
-    if result.returncode != 0:
-        print()
-        print("Something went wrong during the download.")
-        print("Check your internet connection, then run Repair AirControl again.")
-        return False
-    return True
+    if code != 0 and not LAST_ERROR:
+        try:
+            tail = path.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+            LAST_ERROR = "\n".join(tail[-6:])
+        except OSError:
+            LAST_ERROR = "See %s" % path
+
+    return code == 0
 
 
 def fetch_model() -> bool:
@@ -121,10 +173,10 @@ def main() -> int:
     if need:
         if not install(need) or missing():
             message = (
-                "The libraries could not be downloaded.\n\n"
-                "Check your internet connection, then run "
-                "Repair AirControl from the Start Menu."
-            )
+                "Setup could not finish.\n\n"
+                "%s\n\n"
+                "Full details: %s"
+            ) % (LAST_ERROR or "pip did not report a reason.", log_path())
             if quiet:
                 alert(message, icon=0x10)      # error icon
             else:
