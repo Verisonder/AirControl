@@ -6,9 +6,12 @@ Everything runs locally on the CPU. No cloud, no account, no video leaves the ma
 
 ## Install
 
-Download **AirControl-Setup.exe** from [Releases](../../releases) and run it. Python is
-bundled, so nothing else is needed. It installs for the current user only, no administrator
-prompt.
+Download **AirControl-Setup.exe** from [Releases](../../releases) and run it. It installs for
+the current user only, no administrator prompt.
+
+The installer is small because it carries Python but not the libraries. Those are fetched the
+first time you run it — around 400 MB, once. If that download fails, **Repair AirControl** in
+the Start Menu runs it again.
 
 Your gestures are kept in `%APPDATA%\AirControl\gestures.json` and survive an upgrade.
 
