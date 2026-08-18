@@ -10,9 +10,47 @@ Matching is the mean distance between two normalised poses. Small is similar.
 
 import json
 import math
+import os
+import shutil
 from pathlib import Path
 
-STORE = Path(__file__).with_name("gestures.json")
+
+def _store_path() -> Path:
+    """
+    Where gestures live.
+
+    Beside the script when running from a checkout, so a clone stays
+    self-contained. In the user's own data folder once installed, since the
+    program directory may not be writable and gestures should survive an
+    upgrade.
+    """
+    here = Path(__file__).resolve().parent
+    local = here / "gestures.json"
+
+    portable = here / "portable.txt"
+    if portable.exists() or os.access(here, os.W_OK) and not (here / "installed.txt").exists():
+        return local
+
+    if os.name == "nt":
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+
+    folder = base / "AirControl"
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / "gestures.json"
+
+    # Carry over anything recorded before the move
+    if local.exists() and not target.exists():
+        try:
+            shutil.copy2(local, target)
+        except OSError:
+            pass
+
+    return target
+
+
+STORE = _store_path()
 
 WRIST = 0
 MIDDLE_MCP = 9

@@ -4,16 +4,27 @@ Control your laptop with hand gestures through the webcam.
 
 Everything runs locally on the CPU. No cloud, no account, no video leaves the machine.
 
-## Setup
+## Install
+
+Download **AirControl-Setup.exe** from [Releases](../../releases) and run it. Python is
+bundled, so nothing else is needed. It installs for the current user only, no administrator
+prompt.
+
+Your gestures are kept in `%APPDATA%\AirControl\gestures.json` and survive an upgrade.
+
+## Running from source
 
 ```
 pip install -r requirements.txt
+python gui.py
 ```
 
 MediaPipe usually lags a release or two behind the newest Python. If pip refuses it, check
 `python --version` and install an older Python alongside.
 
-## Use
+## The command line tools
+
+The window is the easy way in, but everything works from a terminal too.
 
 **Record your gestures**
 

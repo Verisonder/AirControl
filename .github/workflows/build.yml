@@ -1,0 +1,76 @@
+name: Build AirControl
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble bundle + build installer .exe
+        shell: pwsh
+        run: |
+          $ver = "3.12.7"
+          # 1) bundled Python runtime
+          Invoke-WebRequest "https://www.python.org/ftp/python/$ver/python-$ver-embed-amd64.zip" -OutFile embed.zip
+          New-Item -ItemType Directory -Force -Path AirControl | Out-Null
+          Expand-Archive embed.zip -DestinationPath AirControl -Force
+          $pth = (Get-ChildItem AirControl\python*._pth)[0].FullName
+          (Get-Content $pth) -replace '#\s*import site','import site' | Set-Content $pth
+          Add-Content $pth "Lib\site-packages"
+
+          # 2) pip + deps into the bundle
+          Invoke-WebRequest "https://bootstrap.pypa.io/get-pip.py" -OutFile get-pip.py
+          .\AirControl\python.exe get-pip.py --no-warn-script-location
+          .\AirControl\python.exe -m pip install --no-warn-script-location PySide6 mediapipe opencv-python pyautogui
+
+          # 3) app files
+          Copy-Item gui.py, aircontrol.py, record.py, preview.py, fingers.py, hands.py, gestures.py, actions.py AirControl\
+          Copy-Item aircontrol.ico AirControl\
+          New-Item -ItemType File -Path AirControl\installed.txt -Force | Out-Null
+
+          # 4) the hand model, so first run needs no internet
+          Invoke-WebRequest "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task" -OutFile AirControl\hand_landmarker.task
+
+          # 5) build the installer with Inno Setup
+          choco install innosetup -y --no-progress
+          $appver = (Get-Content VERSION).Trim()
+          $iss = @"
+          [Setup]
+          AppName=AirControl
+          AppVersion=$appver
+          DefaultDirName={localappdata}\AirControl
+          DisableProgramGroupPage=yes
+          PrivilegesRequired=lowest
+          OutputBaseFilename=AirControl-Setup
+          SetupIconFile=aircontrol.ico
+          UninstallDisplayIcon={app}\aircontrol.ico
+          Compression=lzma2
+          SolidCompression=yes
+          [Tasks]
+          Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"
+          [Files]
+          Source: "AirControl\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
+          [Icons]
+          Name: "{userdesktop}\AirControl"; Filename: "{app}\pythonw.exe"; Parameters: """{app}\gui.py"""; IconFilename: "{app}\aircontrol.ico"; WorkingDir: "{app}"; Tasks: desktopicon
+          Name: "{userprograms}\AirControl"; Filename: "{app}\pythonw.exe"; Parameters: """{app}\gui.py"""; IconFilename: "{app}\aircontrol.ico"; WorkingDir: "{app}"
+          [Run]
+          Filename: "{app}\pythonw.exe"; Parameters: """{app}\gui.py"""; Flags: nowait postinstall skipifsilent
+          "@
+          Set-Content -Path aircontrol.iss -Value $iss -Encoding ASCII
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" aircontrol.iss
+
+      - name: Publish installer to Releases
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Output/AirControl-Setup.exe
+          generate_release_notes: true
