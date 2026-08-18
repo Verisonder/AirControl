@@ -460,9 +460,18 @@ class KeyCatcher(QPushButton):
             parts.append("<%s>" % self.SPECIAL[key])
         elif Qt.Key_F1 <= key <= Qt.Key_F24:
             parts.append("<f%d>" % (key - Qt.Key_F1 + 1))
+        elif Qt.Key_A <= key <= Qt.Key_Z:
+            # Read the key code, not the text. With Ctrl held, Windows reports
+            # Ctrl+Z as the control character 0x1A rather than the letter, and
+            # storing that raw is what put a box on the button.
+            parts.append(chr(key).lower())
+        elif Qt.Key_0 <= key <= Qt.Key_9:
+            parts.append(chr(key))
         else:
             text = event.text().strip().lower()
-            if not text:
+            # Only accept something printable - control codes and dead keys are
+            # not shortcuts anyone meant to press
+            if not text or not text.isprintable() or len(text) != 1:
                 return                       # nothing usable, keep listening
             parts.append(text)
 
