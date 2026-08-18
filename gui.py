@@ -367,6 +367,128 @@ class RecordDialog(QDialog):
 
 
 # --------------------------------------------------------------------------
+# Capturing a shortcut
+# --------------------------------------------------------------------------
+
+class KeyCatcher(QPushButton):
+    """
+    Click it, press the combination you want, and it writes itself down.
+
+    Qt names keys one way and pynput another, so what is shown and what is
+    stored are deliberately kept apart: the button shows Ctrl+Shift+Z while the
+    settings file holds <ctrl>+<shift>+z.
+    """
+
+    captured = Signal(str)
+
+    # Keys that are not a single character need naming for pynput
+    SPECIAL = {
+        Qt.Key_Space: "space", Qt.Key_Tab: "tab", Qt.Key_Return: "enter",
+        Qt.Key_Enter: "enter", Qt.Key_Backspace: "backspace",
+        Qt.Key_Delete: "delete", Qt.Key_Insert: "insert",
+        Qt.Key_Home: "home", Qt.Key_End: "end",
+        Qt.Key_PageUp: "page_up", Qt.Key_PageDown: "page_down",
+        Qt.Key_Up: "up", Qt.Key_Down: "down",
+        Qt.Key_Left: "left", Qt.Key_Right: "right",
+        Qt.Key_Print: "print_screen", Qt.Key_Pause: "pause",
+    }
+
+    MODIFIERS = (Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta,
+                 Qt.Key_AltGr, Qt.Key_CapsLock)
+
+    def __init__(self, value: str = "", parent=None):
+        super().__init__(parent)
+        self.value = value
+        self.listening = False
+        self.setCheckable(True)
+        self.clicked.connect(self._toggle)
+        self._show()
+
+    # -- display ---------------------------------------------------------
+
+    @staticmethod
+    def pretty(value: str) -> str:
+        """<ctrl>+<shift>+z  ->  Ctrl + Shift + Z"""
+        if not value:
+            return "None"
+        parts = []
+        for piece in value.split("+"):
+            piece = piece.strip().strip("<>")
+            parts.append(piece.replace("_", " ").title() if len(piece) > 1 else piece.upper())
+        return " + ".join(parts)
+
+    def _show(self):
+        self.setText("Press the keys..." if self.listening else self.pretty(self.value))
+
+    def _toggle(self):
+        self.listening = self.isChecked()
+        self._show()
+        if self.listening:
+            self.grabKeyboard()
+        else:
+            self.releaseKeyboard()
+
+    # -- capture ---------------------------------------------------------
+
+    def keyPressEvent(self, event):
+        if not self.listening:
+            super().keyPressEvent(event)
+            return
+
+        key = event.key()
+
+        if key == Qt.Key_Escape:
+            self._stop()
+            return
+
+        # Wait for a real key - modifiers alone are not a shortcut
+        if key in self.MODIFIERS:
+            return
+
+        mods = event.modifiers()
+        parts = []
+        if mods & Qt.ControlModifier:
+            parts.append("<ctrl>")
+        if mods & Qt.AltModifier:
+            parts.append("<alt>")
+        if mods & Qt.ShiftModifier:
+            parts.append("<shift>")
+        if mods & Qt.MetaModifier:
+            parts.append("<cmd>")
+
+        if key in self.SPECIAL:
+            parts.append("<%s>" % self.SPECIAL[key])
+        elif Qt.Key_F1 <= key <= Qt.Key_F24:
+            parts.append("<f%d>" % (key - Qt.Key_F1 + 1))
+        else:
+            text = event.text().strip().lower()
+            if not text:
+                return                       # nothing usable, keep listening
+            parts.append(text)
+
+        if len(parts) < 2:
+            # A bare letter would fire while typing anywhere, so insist on a
+            # modifier rather than handing over a shortcut that ruins typing
+            self.setText("Add Ctrl, Alt or Shift")
+            return
+
+        self.value = "+".join(parts)
+        self.captured.emit(self.value)
+        self._stop()
+
+    def _stop(self):
+        self.listening = False
+        self.setChecked(False)
+        self.releaseKeyboard()
+        self._show()
+
+    def focusOutEvent(self, event):
+        if self.listening:
+            self._stop()
+        super().focusOutEvent(event)
+
+
+# --------------------------------------------------------------------------
 # Settings
 # --------------------------------------------------------------------------
 
@@ -380,8 +502,8 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Settings")
         self.setMinimumWidth(460)
 
-        self.hotkey = QLineEdit(settings["hotkey"])
-        self.hotkey.setPlaceholderText("<ctrl>+<alt>+a")
+        self.hotkey = KeyCatcher(settings["hotkey"])
+        self.hotkey.captured.connect(self._apply_hotkey)
         if not HAVE_HOTKEY:
             self.hotkey.setEnabled(False)
             self.hotkey.setText("pynput is not installed")
@@ -409,8 +531,8 @@ class SettingsDialog(QDialog):
         form = QFormLayout()
         form.addRow("Shortcut", self._with_hint(
             self.hotkey,
-            "Turns gestures on and off from anywhere. Write it as "
-            "<ctrl>+<alt>+a, using <shift>, <cmd> and so on."))
+            "Turns gestures on and off from anywhere. Click, then press the "
+            "keys you want. Needs at least one of Ctrl, Alt or Shift."))
         form.addRow("", self.close_to_tray)
         form.addRow("", self.start_minimised)
         form.addRow("", self.check_updates)
@@ -440,7 +562,7 @@ class SettingsDialog(QDialog):
             w.valueChanged.connect(self._apply)
         for box in (self.close_to_tray, self.start_minimised, self.check_updates):
             box.toggled.connect(self._apply)
-        self.hotkey.editingFinished.connect(self._apply_hotkey)
+
 
     def _check_now(self):
         self.check_now.setEnabled(False)
@@ -479,12 +601,12 @@ class SettingsDialog(QDialog):
         line.setStyleSheet("background:#2a2a2a;")
         return line
 
-    def _apply_hotkey(self):
-        text = self.hotkey.text().strip()
-        if HAVE_HOTKEY and text and text != self.settings["hotkey"]:
-            self.settings["hotkey"] = text
+    @Slot(str)
+    def _apply_hotkey(self, combination: str):
+        if HAVE_HOTKEY and combination and combination != self.settings["hotkey"]:
+            self.settings["hotkey"] = combination
             appsettings.save(self.settings)
-            self.hotkey_changed.emit(text)
+            self.hotkey_changed.emit(combination)
 
     def _spin(self, lo, hi, step, value, decimals=2):
         box = QDoubleSpinBox()
