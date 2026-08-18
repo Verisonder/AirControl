@@ -113,6 +113,14 @@ def install(packages) -> bool:
         log.write("packages: %s\n\n" % ", ".join(packages))
         log.flush()
 
+        # The bundled Python has no setuptools. Anything without a ready-made
+        # wheel has to be built, and the build fails on the spot without it.
+        log.write("--- build tools ---\n")
+        log.flush()
+        _run_pip(base + ["setuptools", "wheel"], log)
+
+        log.write("\n--- packages ---\n")
+        log.flush()
         code = _run_pip(base + list(packages), log)
 
         if code != 0:

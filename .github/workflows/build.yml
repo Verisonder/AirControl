@@ -36,6 +36,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "pip bootstrap failed" }
           .\AirControl\python.exe -m pip --version
           if ($LASTEXITCODE -ne 0) { throw "pip is not usable" }
+          # setuptools up front - the embedded runtime has none, and any package
+          # without a ready-made wheel cannot be built without it
+          .\AirControl\python.exe -m pip install --no-warn-script-location setuptools wheel
+          if ($LASTEXITCODE -ne 0) { throw "setuptools did not install" }
 
           # 3) app files
           Copy-Item launch.py, setup_deps.py, gui.py, aircontrol.py, record.py, preview.py, fingers.py, hands.py, gestures.py, actions.py AirControl\
