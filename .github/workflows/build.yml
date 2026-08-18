@@ -70,10 +70,10 @@ jobs:
           [Icons]
           Name: "{userdesktop}\AirControl"; Filename: "{app}\pythonw.exe"; Parameters: """{app}\launch.py"""; IconFilename: "{app}\aircontrol.ico"; WorkingDir: "{app}"; Tasks: desktopicon
           Name: "{userprograms}\AirControl"; Filename: "{app}\pythonw.exe"; Parameters: """{app}\launch.py"""; IconFilename: "{app}\aircontrol.ico"; WorkingDir: "{app}"
-          Name: "{userprograms}\Repair AirControl"; Filename: "{app}\python.exe"; Parameters: """{app}\setup_deps.py"""; IconFilename: "{app}\aircontrol.ico"; WorkingDir: "{app}"
+          Name: "{userprograms}\Repair AirControl"; Filename: "{app}\pythonw.exe"; Parameters: """{app}\setup_deps.py"" --quiet"; IconFilename: "{app}\aircontrol.ico"; WorkingDir: "{app}"
           [Run]
-          Filename: "{app}\python.exe"; Parameters: """{app}\setup_deps.py"""; Description: "Download the libraries now (about 400 MB)"; Flags: postinstall skipifsilent
-          Filename: "{app}\pythonw.exe"; Parameters: """{app}\launch.py"""; Description: "Start AirControl"; Flags: nowait postinstall skipifsilent unchecked
+          Filename: "{app}\pythonw.exe"; Parameters: """{app}\setup_deps.py"" --quiet"; StatusMsg: "Downloading libraries (about 400 MB). This can take several minutes..."; Flags: runhidden waituntilterminated
+          Filename: "{app}\pythonw.exe"; Parameters: """{app}\launch.py"""; Description: "Start AirControl"; Flags: nowait postinstall skipifsilent
           "@
           Set-Content -Path aircontrol.iss -Value $iss -Encoding ASCII
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" aircontrol.iss
