@@ -10,21 +10,34 @@ poses, bind them, and turn the whole thing on and off.
 
 import sys
 import time
+import webbrowser
+from pathlib import Path
 
 import cv2
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot, QTimer
-from PySide6.QtGui import QImage, QPixmap, QFont
+from PySide6.QtGui import QAction, QIcon, QImage, QPixmap, QFont
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMainWindow, QMessageBox, QPushButton, QSlider, QVBoxLayout, QWidget,
+    QMainWindow, QMenu, QMessageBox, QPushButton, QSystemTrayIcon, QVBoxLayout,
+    QWidget,
 )
 
 import actions
+import appsettings
 import gestures
 import hands as H
+import updates
 from aircontrol import Mouse, Trigger, PALM, HAVE_MOUSE
+
+try:
+    from pynput import keyboard as pynput_keyboard
+    HAVE_HOTKEY = True
+except Exception:
+    HAVE_HOTKEY = False
+
+ICON_PATH = Path(__file__).resolve().with_name("aircontrol.ico")
 
 
 # --------------------------------------------------------------------------
@@ -179,6 +192,54 @@ class Engine(QThread):
             self.failed.emit("The camera stopped:\n\n%s" % exc)
 
 
+class Hotkey(QThread):
+    """
+    Listens for one key combination anywhere in Windows.
+
+    Runs in its own thread because the listener blocks. Restarted rather than
+    reconfigured when the combination changes - it is cheap and avoids fighting
+    pynput's internal state.
+    """
+
+    pressed = Signal()
+
+    def __init__(self, combination: str):
+        super().__init__()
+        self.combination = combination
+        self._listener = None
+
+    def run(self):
+        if not HAVE_HOTKEY:
+            return
+        try:
+            self._listener = pynput_keyboard.GlobalHotKeys(
+                {self.combination: self.pressed.emit}
+            )
+            self._listener.run()
+        except Exception:
+            # A malformed combination should not take the app down
+            self._listener = None
+
+    def stop(self):
+        if self._listener is not None:
+            try:
+                self._listener.stop()
+            except Exception:
+                pass
+        self.wait(1500)
+
+
+class UpdateCheck(QThread):
+    """Asks GitHub whether there is a newer release. Silent on failure."""
+
+    found = Signal(str, str)
+
+    def run(self):
+        result = updates.newer_than_installed()
+        if result:
+            self.found.emit(*result)
+
+
 # --------------------------------------------------------------------------
 # Naming a captured pose
 # --------------------------------------------------------------------------
@@ -240,11 +301,29 @@ class RecordDialog(QDialog):
 # --------------------------------------------------------------------------
 
 class SettingsDialog(QDialog):
-    def __init__(self, engine, parent=None):
+    hotkey_changed = Signal(str)
+
+    def __init__(self, engine, settings, parent=None):
         super().__init__(parent)
         self.engine = engine
+        self.settings = settings
         self.setWindowTitle("Settings")
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(460)
+
+        self.hotkey = QLineEdit(settings["hotkey"])
+        self.hotkey.setPlaceholderText("<ctrl>+<alt>+a")
+        if not HAVE_HOTKEY:
+            self.hotkey.setEnabled(False)
+            self.hotkey.setText("pynput is not installed")
+
+        self.close_to_tray = QCheckBox("Keep running when the window is closed")
+        self.close_to_tray.setChecked(settings["close_to_tray"])
+
+        self.start_minimised = QCheckBox("Start hidden in the tray")
+        self.start_minimised.setChecked(settings["start_minimised"])
+
+        self.check_updates = QCheckBox("Check for updates on start")
+        self.check_updates.setChecked(settings["check_updates"])
 
         self.tolerance = self._spin(0.05, 0.6, 0.01, engine.tolerance)
         self.hold = self._spin(1, 30, 1, engine.hold_frames, decimals=0)
@@ -253,6 +332,14 @@ class SettingsDialog(QDialog):
         self.smoothing = self._spin(0.05, 1.0, 0.05, engine.smoothing)
 
         form = QFormLayout()
+        form.addRow("Shortcut", self._with_hint(
+            self.hotkey,
+            "Turns gestures on and off from anywhere. Write it as "
+            "<ctrl>+<alt>+a, using <shift>, <cmd> and so on."))
+        form.addRow("", self.close_to_tray)
+        form.addRow("", self.start_minimised)
+        form.addRow("", self.check_updates)
+        form.addRow(self._divider())
         form.addRow("Match tolerance", self._with_hint(
             self.tolerance, "Lower is stricter. Raise it if a pose is not recognised."))
         form.addRow("Hold frames", self._with_hint(
@@ -274,6 +361,22 @@ class SettingsDialog(QDialog):
 
         for w in (self.tolerance, self.hold, self.cooldown, self.margin, self.smoothing):
             w.valueChanged.connect(self._apply)
+        for box in (self.close_to_tray, self.start_minimised, self.check_updates):
+            box.toggled.connect(self._apply)
+        self.hotkey.editingFinished.connect(self._apply_hotkey)
+
+    def _divider(self):
+        line = QLabel()
+        line.setFixedHeight(1)
+        line.setStyleSheet("background:#2a2a2a;")
+        return line
+
+    def _apply_hotkey(self):
+        text = self.hotkey.text().strip()
+        if HAVE_HOTKEY and text and text != self.settings["hotkey"]:
+            self.settings["hotkey"] = text
+            appsettings.save(self.settings)
+            self.hotkey_changed.emit(text)
 
     def _spin(self, lo, hi, step, value, decimals=2):
         box = QDoubleSpinBox()
@@ -302,6 +405,18 @@ class SettingsDialog(QDialog):
         self.engine.margin = self.margin.value()
         self.engine.smoothing = self.smoothing.value()
 
+        self.settings.update({
+            "tolerance": self.engine.tolerance,
+            "hold_frames": self.engine.hold_frames,
+            "cooldown": self.engine.cooldown,
+            "margin": self.engine.margin,
+            "smoothing": self.engine.smoothing,
+            "close_to_tray": self.close_to_tray.isChecked(),
+            "start_minimised": self.start_minimised.isChecked(),
+            "check_updates": self.check_updates.isChecked(),
+        })
+        appsettings.save(self.settings)
+
 
 # --------------------------------------------------------------------------
 # Main window
@@ -313,12 +428,23 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("AirControl")
         self.resize(1000, 620)
 
+        self.settings = appsettings.load()
         self.library = gestures.Library()
+
         self.engine = Engine(self.library)
+        self.engine.tolerance = self.settings["tolerance"]
+        self.engine.hold_frames = self.settings["hold_frames"]
+        self.engine.cooldown = self.settings["cooldown"]
+        self.engine.margin = self.settings["margin"]
+        self.engine.smoothing = self.settings["smoothing"]
         self.engine.frame_ready.connect(self.show_frame)
         self.engine.status.connect(self.show_status)
         self.engine.fired.connect(self.show_fired)
         self.engine.failed.connect(self.show_failure)
+
+        self.hotkey = None
+        self.update_url = ""
+        self.quitting = False
 
         # -- left: camera
         self.video = QLabel("Starting the camera...")
@@ -336,6 +462,21 @@ class MainWindow(QMainWindow):
         # -- right: gestures
         title = QLabel("Gestures")
         title.setFont(QFont("", 14, QFont.Bold))
+
+        self.update_btn = QPushButton("Update available")
+        self.update_btn.setCursor(Qt.PointingHandCursor)
+        self.update_btn.clicked.connect(self.open_update)
+        self.update_btn.hide()
+        self.update_btn.setStyleSheet(
+            "QPushButton{background:#c62828;border:none;border-radius:6px;"
+            "padding:5px 10px;font-size:11px;}"
+            "QPushButton:hover{background:#d32f2f;}"
+        )
+
+        title_row = QHBoxLayout()
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        title_row.addWidget(self.update_btn)
 
         self.list = QListWidget()
         self.list.setStyleSheet(
@@ -372,7 +513,7 @@ class MainWindow(QMainWindow):
         row.addWidget(self.delete_btn)
 
         right = QVBoxLayout()
-        right.addWidget(title)
+        right.addLayout(title_row)
         right.addWidget(self.list, 1)
         right.addWidget(self.record_btn)
         right.addLayout(row)
@@ -388,8 +529,19 @@ class MainWindow(QMainWindow):
         holder.setLayout(body)
         self.setCentralWidget(holder)
 
+        self.build_tray()
         self.refresh()
         self.engine.start(QThread.HighPriority)
+        self.start_hotkey(self.settings["hotkey"])
+
+        if self.settings["check_updates"]:
+            self.updater = UpdateCheck()
+            self.updater.found.connect(self.update_available)
+            self.updater.start()
+
+        if not HAVE_HOTKEY:
+            self.statusBar().showMessage(
+                "The keyboard shortcut needs pynput. Install it with: pip install pynput", 8000)
 
         if not HAVE_MOUSE:
             self.statusBar().showMessage(
@@ -518,11 +670,96 @@ class MainWindow(QMainWindow):
             self.refresh()
 
     def open_settings(self):
-        SettingsDialog(self.engine, self).exec()
+        dialog = SettingsDialog(self.engine, self.settings, self)
+        dialog.hotkey_changed.connect(self.start_hotkey)
+        dialog.exec()
 
-    def toggle_active(self, on):
+    def toggle_active(self, on=None):
+        if on is None:
+            on = not self.engine.active
+            self.toggle.setChecked(on)
         self.engine.active = on
         self.toggle.setText("Turn off" if on else "Turn on")
+        self.tray_toggle.setText("Turn off" if on else "Turn on")
+        self.tray.setToolTip("AirControl - %s" % ("on" if on else "off"))
+        if self.tray.supportsMessages() and not self.isVisible():
+            self.tray.showMessage("AirControl",
+                                  "Gestures are %s." % ("on" if on else "off"),
+                                  QSystemTrayIcon.Information, 1500)
+
+    # -- tray -------------------------------------------------------------
+
+    def build_tray(self):
+        icon = QIcon(str(ICON_PATH)) if ICON_PATH.exists() else self.style().standardIcon(
+            self.style().StandardPixmap.SP_ComputerIcon)
+        self.setWindowIcon(icon)
+
+        self.tray = QSystemTrayIcon(icon, self)
+        self.tray.setToolTip("AirControl - off")
+
+        menu = QMenu()
+        show = QAction("Open AirControl", self)
+        show.triggered.connect(self.show_window)
+
+        self.tray_toggle = QAction("Turn on", self)
+        self.tray_toggle.triggered.connect(lambda: self.toggle_active(None))
+
+        quit_action = QAction("Quit", self)
+        quit_action.triggered.connect(self.really_quit)
+
+        menu.addAction(show)
+        menu.addSeparator()
+        menu.addAction(self.tray_toggle)
+        menu.addSeparator()
+        menu.addAction(quit_action)
+
+        self.tray.setContextMenu(menu)
+        self.tray.activated.connect(self.tray_clicked)
+        self.tray.show()
+
+    def tray_clicked(self, reason):
+        if reason == QSystemTrayIcon.Trigger:
+            self.show_window()
+
+    def show_window(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def really_quit(self):
+        self.quitting = True
+        self.close()
+        QApplication.quit()
+
+    # -- global shortcut --------------------------------------------------
+
+    def start_hotkey(self, combination: str):
+        if not HAVE_HOTKEY:
+            return
+        if self.hotkey is not None:
+            self.hotkey.stop()
+            self.hotkey = None
+        if not combination:
+            return
+        self.hotkey = Hotkey(combination)
+        self.hotkey.pressed.connect(self.hotkey_fired)
+        self.hotkey.start()
+
+    @Slot()
+    def hotkey_fired(self):
+        self.toggle_active(None)
+
+    # -- updates ----------------------------------------------------------
+
+    @Slot(str, str)
+    def update_available(self, tag, url):
+        self.update_url = url
+        self.update_btn.setText("Update to %s" % tag)
+        self.update_btn.show()
+
+    def open_update(self):
+        if self.update_url:
+            webbrowser.open(self.update_url)
 
     # -- from the engine --------------------------------------------------
 
@@ -558,8 +795,23 @@ class MainWindow(QMainWindow):
         super().showEvent(event)
 
     def closeEvent(self, event):
+        # Closing the window normally means "get out of my way", not "stop
+        # working" - the whole point is that gestures keep running.
+        if self.settings["close_to_tray"] and not self.quitting:
+            event.ignore()
+            self.hide()
+            if self.tray.supportsMessages():
+                self.tray.showMessage(
+                    "AirControl",
+                    "Still running. Use the tray icon to open or quit.",
+                    QSystemTrayIcon.Information, 2500)
+            return
+
         self.engine.active = False
         self.engine.stop()
+        if self.hotkey is not None:
+            self.hotkey.stop()
+        self.tray.hide()
         event.accept()
 
 
@@ -577,8 +829,14 @@ def main() -> int:
         QStatusBar { color:#8a8a8a; }
     """)
 
+    # Closing to the tray must not end the program
+    app.setQuitOnLastWindowClosed(False)
+
     window = MainWindow()
-    window.show()
+    if window.settings["start_minimised"]:
+        window.hide()
+    else:
+        window.show()
     return app.exec()
 
 

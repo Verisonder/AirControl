@@ -44,6 +44,12 @@ once. "Move cursor" and "left click" drive the mouse instead.
 python aircontrol.py
 ```
 
+It keeps running in the tray when you close the window, and one keyboard shortcut turns
+gestures on and off from anywhere — `Ctrl+Alt+A` by default, changeable in Settings. An update
+button appears in the corner when a newer release exists.
+
+### Command line keys
+
 | Key | |
 |---|---|
 | P | pause everything |

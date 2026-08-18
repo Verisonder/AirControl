@@ -12,7 +12,7 @@ silent and report through a dialog instead of the console.
 import subprocess
 import sys
 
-PACKAGES = ["PySide6", "mediapipe", "opencv-python", "pyautogui"]
+PACKAGES = ["PySide6", "mediapipe", "opencv-python", "pyautogui", "pynput"]
 
 MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/hand_landmarker/"
@@ -27,6 +27,7 @@ def missing() -> list:
         "mediapipe": "mediapipe",
         "opencv-python": "cv2",
         "pyautogui": "pyautogui",
+        "pynput": "pynput",
     }
     out = []
     for package, module in checks.items():

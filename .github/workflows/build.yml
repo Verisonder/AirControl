@@ -42,12 +42,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "setuptools did not install" }
 
           # 3) app files
-          Copy-Item launch.py, setup_deps.py, gui.py, aircontrol.py, record.py, preview.py, fingers.py, hands.py, gestures.py, actions.py AirControl\
+          Copy-Item launch.py, setup_deps.py, gui.py, aircontrol.py, record.py, preview.py, fingers.py, hands.py, gestures.py, actions.py, appsettings.py, updates.py, VERSION AirControl\
           Copy-Item aircontrol.ico AirControl\
           New-Item -ItemType File -Path AirControl\installed.txt -Force | Out-Null
 
           # 4) sanity check - every file the shortcut needs must be there
-          foreach ($f in @("python.exe","pythonw.exe","launch.py","gui.py","hands.py","gestures.py","actions.py","aircontrol.py","setup_deps.py","aircontrol.ico")) {
+          foreach ($f in @("python.exe","pythonw.exe","launch.py","gui.py","hands.py","gestures.py","actions.py","aircontrol.py","setup_deps.py","appsettings.py","updates.py","VERSION","aircontrol.ico")) {
             if (-not (Test-Path "AirControl\$f")) { throw "missing from bundle: $f" }
           }
 
