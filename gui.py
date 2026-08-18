@@ -51,6 +51,7 @@ class Engine(QThread):
     status = Signal(str)
     fired = Signal(str)
     failed = Signal(str)
+    camera_off = Signal()
 
     def __init__(self, library):
         super().__init__()
@@ -75,35 +76,65 @@ class Engine(QThread):
         self.running = False
         self.wait(2000)
 
-    def run(self):
-        try:
-            cam = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
-            # A modest feed. The detector shrinks whatever it gets to a small
-            # square, so a 1080p frame is copying and colour conversion spent
-            # for nothing.
-            cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            cam.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            if not cam.isOpened():
-                self.failed.emit(
-                    "Camera %d did not open.\n\n"
-                    "Another application may be using it, or try a different "
-                    "camera in Settings." % self.camera_index
-                )
-                return
+    def open_camera(self):
+        cam = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+        if not cam.isOpened():
+            cam.release()
+            return None
+        # A modest feed. The detector shrinks whatever it gets to a small
+        # square, so a 1080p frame is copying and colour conversion spent for
+        # nothing.
+        cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        cam.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        return cam
 
+    def run(self):
+        cam = None
+        try:
             fps = H.Fps()
             trigger = Trigger(self.hold_frames, self.cooldown)
             mouse = Mouse(self.margin, self.smoothing, 3, dry=False)
             started = time.time()
             last_hand = time.time()
+            announced_off = False
 
             with H.make_landmarker(2) as landmarker:
                 while self.running:
+                    # The camera is only held while it is actually wanted.
+                    # Letting go of it turns off the indicator light, which is
+                    # the only honest sign that nothing is being watched.
+                    if not (self.active or self.capture_next):
+                        if cam is not None:
+                            cam.release()
+                            cam = None
+                            mouse.lost()
+                        if not announced_off:
+                            self.camera_off.emit()
+                            self.status.emit("camera off")
+                            announced_off = True
+                        time.sleep(0.2)
+                        continue
+
+                    if cam is None:
+                        cam = self.open_camera()
+                        if cam is None:
+                            self.failed.emit(
+                                "Camera %d did not open.\n\n"
+                                "Another application may be using it, or try a "
+                                "different camera in Settings." % self.camera_index
+                            )
+                            self.active = False
+                            self.capture_next = False
+                            time.sleep(1.0)
+                            continue
+                        announced_off = False
+                        last_hand = time.time()
+
                     # Idling out of sight: an empty room does not need thirty
                     # detections a second. Drop to a slow poll after a few
-                    # seconds with no hand, and jump straight back to full speed
-                    # the moment one appears.
+                    # seconds with no hand, and jump back to full speed the
+                    # moment one appears.
                     if not self.preview and time.time() - last_hand > 3.0:
                         time.sleep(0.12)
 
@@ -202,11 +233,13 @@ class Engine(QThread):
                     else:
                         fps.tick()
 
-            cam.release()
             mouse.release()
 
         except Exception as exc:                       # keep the window alive
             self.failed.emit("The camera stopped:\n\n%s" % exc)
+        finally:
+            if cam is not None:
+                cam.release()
 
 
 class Hotkey(QThread):
@@ -498,13 +531,14 @@ class MainWindow(QMainWindow):
         self.engine.status.connect(self.show_status)
         self.engine.fired.connect(self.show_fired)
         self.engine.failed.connect(self.show_failure)
+        self.engine.camera_off.connect(self.show_camera_off)
 
         self.hotkey = None
         self.update_url = ""
         self.quitting = False
 
         # -- left: camera
-        self.video = QLabel("Starting the camera...")
+        self.video = QLabel("Camera off\n\nTurn on to start")
         self.video.setAlignment(Qt.AlignCenter)
         self.video.setMinimumSize(560, 420)
         self.video.setStyleSheet("background:#111; border-radius:10px; color:#777;")
@@ -631,6 +665,12 @@ class MainWindow(QMainWindow):
 
     def record(self):
         self.record_btn.setEnabled(False)
+        # Wake the camera now so it is warm by the time the countdown ends
+        self.engine.capture_next = False
+        self.engine.captured = None
+        was_active = self.engine.active
+        self.engine.active = True
+        self._restore_active = was_active
         self.countdown = 3
         self.record_btn.setText("Hold your pose... 3")
 
@@ -643,13 +683,16 @@ class MainWindow(QMainWindow):
 
             self.engine.captured = None
             self.engine.capture_next = True
-            QTimer.singleShot(400, self.finish_record)
+            # The camera may be off; give it a moment to wake and get a frame
+            QTimer.singleShot(1200, self.finish_record)
 
         QTimer.singleShot(1000, tick)
 
     def finish_record(self):
         self.record_btn.setEnabled(True)
         self.record_btn.setText("Record a gesture")
+        self.engine.capture_next = False
+        self.engine.active = getattr(self, "_restore_active", False)
 
         pose = self.engine.captured
         if pose is None:
@@ -832,6 +875,12 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def show_fired(self, text):
         self.statusBar().showMessage(text, 2000)
+
+    @Slot()
+    def show_camera_off(self):
+        self.video.setPixmap(QPixmap())
+        self.video.setText("Camera off\n\nTurn on to start")
+        self.status.setText("")
 
     @Slot(str)
     def show_failure(self, text):
