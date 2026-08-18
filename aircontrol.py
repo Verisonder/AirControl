@@ -17,6 +17,7 @@ Keys
 """
 
 import argparse
+import math
 import sys
 import time
 
@@ -67,10 +68,14 @@ class Trigger:
 
 
 class Mouse:
-    """Cursor and buttons, driven by a held pose."""
+    """Cursor, buttons and scrolling, driven by a held pose."""
+
+    # How far the hand must leave the middle before scrolling starts, as a
+    # fraction of the frame height
+    SCROLL_DEADZONE = 0.05
 
     def __init__(self, margin: float, smoothing: float, frames: int, dry: bool,
-                 scroll_speed: float = 160.0):
+                 scroll_speed: float = 70.0):
         self.margin = margin
         self.smoothing = smoothing
         self.frames = frames
@@ -85,28 +90,44 @@ class Mouse:
         self._streak = 0
         self._scroll_from = None
         self._scroll_owed = 0.0
+        self._scroll_time = 0.0
         self.event = ""
 
     def scroll(self, ny: float) -> int:
         """
-        Scroll by how far the hand has moved since the last frame.
+        Keep scrolling while the hand is held away from where the pose started.
 
-        Relative rather than absolute, so it behaves like dragging the page:
-        keep moving and it keeps scrolling, stop and it stops. An absolute
-        mapping would snap the page to wherever the hand happened to be when
-        the pose was recognised.
+        Where the hand first appears becomes the middle. Hold it above that and
+        the page keeps moving up for as long as you hold it; the further out,
+        the faster. Come back to the middle and it stops.
+
+        The earlier version scrolled by how far the hand moved between frames,
+        which meant it only moved while the hand did - a held pose did nothing
+        and you had to keep sweeping downwards to read anything.
         """
+        now = time.time()
+
         if self._scroll_from is None:
-            self._scroll_from = ny
+            self._scroll_from = ny          # the middle, set where the pose began
             self._scroll_owed = 0.0
+            self._scroll_time = now
             return 0
 
-        # Screen y grows downward, so a hand moving up is a negative delta and
-        # should scroll the page up, which pyautogui counts as positive
-        self._scroll_owed += (self._scroll_from - ny) * self.scroll_speed
-        self._scroll_from = ny
+        # Clamped, so a stall or a slow frame cannot dump a huge jump at once
+        elapsed = min(now - self._scroll_time, 0.2)
+        self._scroll_time = now
 
-        # Whole clicks only; the remainder carries so slow movement still works
+        # Screen y grows downward, so a hand above the middle is positive here
+        offset = self._scroll_from - ny
+
+        # A dead middle, or the page creeps while you try to hold still
+        if abs(offset) <= self.SCROLL_DEADZONE:
+            return 0
+
+        push = offset - math.copysign(self.SCROLL_DEADZONE, offset)
+        self._scroll_owed += push * self.scroll_speed * elapsed
+
+        # Whole clicks only; the remainder carries so slow scrolling still works
         clicks = int(self._scroll_owed)
         if clicks and not self.dry and HAVE_MOUSE:
             pyautogui.scroll(clicks)
