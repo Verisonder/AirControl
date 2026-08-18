@@ -37,7 +37,7 @@ PRESETS = {
     "mute":         "key:volumemute",
     "close window": "hotkey:alt+f4",
     "screenshot":   "hotkey:win+shift+s",
-    "lock":         "hotkey:win+l",
+    "lock":         "run:rundll32.exe user32.dll,LockWorkStation",
 }
 
 
