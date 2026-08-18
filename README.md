@@ -1,104 +1,109 @@
-# AirControl
+<p align="center">
+  <img src="aircontrol.ico" width="96" alt="AirControl" />
+</p>
 
-Control your laptop with hand gestures through the webcam.
+<h1 align="center">AirControl</h1>
 
-Everything runs locally on the CPU. No cloud, no account, no video leaves the machine.
+<p align="center">
+  Control your laptop with your hands. Nothing but a webcam.
+</p>
+
+<p align="center">
+  <a href="../../releases/latest"><img src="https://img.shields.io/github/v/release/Verisonder/AirControl?style=flat-square&color=c62828&label=download" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/Windows-0D1117?style=flat-square&logo=windows11&logoColor=00A4EF" alt="Windows" />
+  <img src="https://img.shields.io/badge/Python-0D1117?style=flat-square&logo=python&logoColor=FFD343" alt="Python" />
+  <img src="https://img.shields.io/badge/licence-MIT-0D1117?style=flat-square" alt="MIT" />
+</p>
+
+---
+
+Record a pose. Bind it to something. Hold it in front of the camera and it happens.
+
+Everything runs on your own machine. No account, no cloud, no video leaves the laptop. The
+camera is released the moment you turn gestures off, so the indicator light beside your webcam
+is a real answer to whether anything is watching.
 
 ## Install
 
-Download **AirControl-Setup.exe** from [Releases](../../releases) and run it. It installs for
-the current user only, no administrator prompt.
+Download **AirControl-Setup.exe** from [Releases](../../releases/latest) and run it.
 
-The installer is small because it carries Python but not the libraries. Those are fetched the
-first time you run it — around 400 MB, once. If that download fails, **Repair AirControl** in
-the Start Menu runs it again.
+Installs for the current user, no administrator prompt. Python comes with it. The libraries are
+fetched during installation — around 400 MB, once.
 
-Your gestures are kept in `%APPDATA%\AirControl\gestures.json` and survive an upgrade.
+## What it does
+
+**Shortcuts.** Hold a pose for a moment and it fires: show the desktop, switch app, lock the
+screen, play, pause, mute. Or anything else — bind a key combination or a program directly.
+
+**The mouse.** One pose moves the cursor, another holds the left button. A quick close is a
+click. Close and move is a drag. Your other hand is still free for shortcuts.
+
+**Out of the way.** Closing the window keeps it running in the tray. One keyboard shortcut turns
+gestures on and off from anywhere, `Ctrl+Alt+A` by default.
+
+## Recording a gesture
+
+Press **Record a gesture**, hold the pose through a short countdown, then name it and pick what
+it does.
+
+A pose is stored with the hand's position, size and tilt taken out, so the same shape is
+recognised wherever your hand is, however far from the camera, and however tilted. Keep
+different gestures visibly different from each other — the preview shows how close a match is.
+
+Nothing fires the instant a pose is seen. A shortcut has to be held for a few frames and then
+waits before it can fire again, so a flicker while your hand moves does not set something off.
+
+## Settings
+
+| | |
+|---|---|
+| **Shortcut** | The combination that turns gestures on and off from anywhere |
+| **Match tolerance** | Lower is stricter. Raise it if a pose is not being recognised. |
+| **Hold frames** | How long a shortcut pose must be held before it fires |
+| **Cooldown** | Seconds before the same gesture can fire again |
+| **Cursor box** | Higher means a smaller active area, so less hand movement covers the screen |
+| **Cursor smoothing** | Lower is steadier but slower to respond |
 
 ## Running from source
 
 ```
+git clone https://github.com/Verisonder/AirControl.git
+cd AirControl
 pip install -r requirements.txt
 python gui.py
 ```
 
-MediaPipe usually lags a release or two behind the newest Python. If pip refuses it, check
+MediaPipe lags a release or two behind the newest Python. If pip refuses it, check
 `python --version` and install an older Python alongside.
 
-## The command line tools
-
-The window is the easy way in, but everything works from a terminal too.
-
-**Record your gestures**
+There are command line tools too, if you prefer them:
 
 ```
-python record.py
+python record.py        # record gestures
+python aircontrol.py    # run them
+python preview.py       # just the tracking, for checking the camera
+python fingers.py       # which fingers are up, and pose names
 ```
 
-Hold a pose, press SPACE, name it, and pick what it does. Shortcuts like "show desktop" fire
-once. "Move cursor" and "left click" drive the mouse instead.
+## Honest limits
 
-**Then run it**
+Poor light kills detection. It will work at a desk and struggle on a sofa at night.
 
-```
-python aircontrol.py
-```
+Holding an arm up is tiring faster than you expect. This suits a handful of quick actions
+rather than continuous use.
 
-It keeps running in the tray when you close the window, and one keyboard shortcut turns
-gestures on and off from anywhere — `Ctrl+Alt+A` by default, changeable in Settings. An update
-button appears in the corner when a newer release exists.
+A camera running costs battery. Turn gestures off when you are not using them — that genuinely
+releases the camera rather than just ignoring it.
 
-### Command line keys
+Windows blocks some synthetic key combinations. `Win+L` is one, so the lock preset calls the
+Windows API directly instead.
 
-| Key | |
-|---|---|
-| P | pause everything |
-| L | list loaded gestures |
-| R | reload after recording more |
-| Esc | quit |
+## Built with
 
-Add `--dry-run` to watch it work without pressing anything. Worth doing before you bind
-anything destructive.
-
-## How poses are matched
-
-A pose is stored with the hand's position, size and tilt removed, so the same shape matches
-wherever your hand is, however far from the camera, and however tilted. The preview shows the
-match distance — keep different gestures well apart from each other.
-
-Shortcut gestures must be held for a few frames before firing, and there is a cooldown after,
-so a flicker while your hand moves does not set something off. Mouse poses act continuously
-instead: hold the click pose briefly for a click, hold it while moving to drag.
-
-One hand can drive the cursor while the other fires a shortcut.
-
-## Tuning
-
-| Flag | |
-|---|---|
-| `--tolerance` | how close a match must be. Lower is stricter. |
-| `--hold` | frames a shortcut gesture must be held |
-| `--cooldown` | seconds before the same gesture can fire again |
-| `--margin` | bigger means a smaller active box, so less hand movement covers the screen |
-| `--smoothing` | cursor smoothing. Lower is steadier but laggier. |
-| `--camera` | try `1` if the wrong camera opens |
-
-## Checking things
-
-```
-python preview.py     # just the tracking
-python fingers.py     # which fingers are up, and pose names
-```
-
-Useful when something is not being recognised.
-
-## Known limits
-
-Poor light kills detection. Holding an arm up gets tiring, so this suits a handful of quick
-actions rather than continuous use. A camera running constantly costs battery.
-
-Windows blocks some synthetic key combinations. `win+l` is one — the lock preset uses a direct
-Windows call instead.
+[MediaPipe](https://ai.google.dev/edge/mediapipe) for hand tracking, [OpenCV](https://opencv.org)
+for the camera, [PySide6](https://doc.qt.io/qtforpython-6/) for the window,
+[pynput](https://github.com/moses-palmer/pynput) for the global shortcut, and
+[PyAutoGUI](https://pyautogui.readthedocs.io) for pressing things.
 
 ## Licence
 
