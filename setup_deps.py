@@ -41,9 +41,32 @@ def install(packages) -> bool:
     print("Around 400 MB in total.")
     print()
 
-    cmd = [sys.executable, "-m", "pip", "install", "--no-warn-script-location", *packages]
+    # --no-cache-dir on purpose. The shared pip cache is often left owned by an
+    # elevated process from some earlier admin install, and then an ordinary
+    # user cannot write to it - which fails with a permission error that has
+    # nothing to do with where we are actually installing.
+    base = [
+        sys.executable, "-m", "pip", "install",
+        "--no-warn-script-location",
+        "--no-cache-dir",
+        "--disable-pip-version-check",
+    ]
+
     try:
-        result = subprocess.run(cmd)
+        result = subprocess.run(base + list(packages))
+    except Exception as exc:
+        print("Could not start pip: %s" % exc)
+        return False
+
+    if result.returncode == 0:
+        return True
+
+    # Second attempt into the user's own site-packages, in case the program
+    # folder itself is not writable
+    print()
+    print("That did not work. Trying again into your user folder...")
+    try:
+        result = subprocess.run(base + ["--user"] + list(packages))
     except Exception as exc:
         print("Could not start pip: %s" % exc)
         return False
@@ -51,7 +74,7 @@ def install(packages) -> bool:
     if result.returncode != 0:
         print()
         print("Something went wrong during the download.")
-        print("Check your internet connection and run this again.")
+        print("Check your internet connection, then run Repair AirControl again.")
         return False
     return True
 
