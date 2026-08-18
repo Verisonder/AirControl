@@ -329,7 +329,9 @@ class MainWindow(QMainWindow):
         self.list.setStyleSheet(
             "QListWidget{background:#181818;border:none;border-radius:10px;padding:6px;}"
             "QListWidget::item{padding:9px;border-radius:6px;}"
-            "QListWidget::item:selected{background:#2c2c2c;}"
+            "QListWidget::item:selected{background:#2c2c2c;color:#f0f0f0;}"
+            "QListWidget::item:selected:active{background:#2c2c2c;color:#f0f0f0;}"
+            "QListWidget::item:selected:!active{background:#2c2c2c;color:#f0f0f0;}"
         )
 
         self.record_btn = QPushButton("Record a gesture")
