@@ -62,13 +62,23 @@ def make_landmarker(num_hands: int = 1):
     return vision.HandLandmarker.create_from_options(options)
 
 
-def open_camera(index: int = 0):
-    """Open a webcam, or exit with a useful message."""
+def open_camera(index: int = 0, width: int = 640, height: int = 480):
+    """
+    Open a webcam, or exit with a useful message.
+
+    Asks for a modest resolution on purpose. The detector shrinks whatever it
+    is given down to a small square anyway, so a 1080p feed costs a great deal
+    of copying and colour conversion for no extra accuracy.
+    """
     cam = cv2.VideoCapture(index, cv2.CAP_DSHOW)
     if not cam.isOpened():
         print("Camera %d did not open." % index, file=sys.stderr)
         print("Another app may be holding it, or try --camera 1", file=sys.stderr)
         raise SystemExit(1)
+
+    cam.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cam.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    cam.set(cv2.CAP_PROP_BUFFERSIZE, 1)      # take the newest frame, not a backlog
     return cam
 
 

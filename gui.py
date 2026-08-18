@@ -78,6 +78,12 @@ class Engine(QThread):
     def run(self):
         try:
             cam = cv2.VideoCapture(self.camera_index, cv2.CAP_DSHOW)
+            # A modest feed. The detector shrinks whatever it gets to a small
+            # square, so a 1080p frame is copying and colour conversion spent
+            # for nothing.
+            cam.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            cam.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             if not cam.isOpened():
                 self.failed.emit(
                     "Camera %d did not open.\n\n"
@@ -90,9 +96,17 @@ class Engine(QThread):
             trigger = Trigger(self.hold_frames, self.cooldown)
             mouse = Mouse(self.margin, self.smoothing, 3, dry=False)
             started = time.time()
+            last_hand = time.time()
 
             with H.make_landmarker(2) as landmarker:
                 while self.running:
+                    # Idling out of sight: an empty room does not need thirty
+                    # detections a second. Drop to a slow poll after a few
+                    # seconds with no hand, and jump straight back to full speed
+                    # the moment one appears.
+                    if not self.preview and time.time() - last_hand > 3.0:
+                        time.sleep(0.12)
+
                     ok, frame = cam.read()
                     if not ok:
                         continue
@@ -112,6 +126,9 @@ class Engine(QThread):
                     mouse_action, mouse_lm = None, None
                     first_lm, first_side = None, "Right"
                     seen = []
+
+                    if result.hand_landmarks:
+                        last_hand = time.time()
 
                     showing = self.preview
 
