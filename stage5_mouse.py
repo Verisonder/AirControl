@@ -153,9 +153,7 @@ def main() -> int:
                     lm = result.hand_landmarks[0]
                     H.draw_hand(frame, lm)
 
-                    side = "Right"
-                    if result.handedness and result.handedness[0]:
-                        side = result.handedness[0][0].category_name
+                    side = H.handedness_of(result, 0, not args.no_mirror)
 
                     hit, dist = lib.match(lm, side, args.tolerance)
                     if hit and hit.get("action") in actions.MOUSE_ACTIONS:

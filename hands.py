@@ -95,21 +95,40 @@ def hand_size(lm) -> float:
     return max((dx * dx + dy * dy) ** 0.5, 1e-6)
 
 
-def fingers_up(lm, handedness: str = "Right") -> list:
+def handedness_of(result, i: int, mirrored: bool = True) -> str:
+    """
+    Which real hand this is: "Left" or "Right".
+
+    The tracker names hands as though it were looking at an unmirrored picture.
+    We flip the frame first so the preview behaves like a mirror, which means
+    its answer arrives back to front. This puts it right again, so "Left"
+    always means the hand on the left side of your body.
+    """
+    side = "Right"
+    if i < len(result.handedness) and result.handedness[i]:
+        side = result.handedness[i][0].category_name
+    if mirrored:
+        side = "Left" if side == "Right" else "Right"
+    return side
+
+
+def fingers_up(lm, handedness: str = "Right", mirrored: bool = True) -> list:
     """
     Which fingers are extended: [thumb, index, middle, ring, pinky].
 
     The four fingers are simple - a tip sits above its middle joint when the
     finger is straight, and y grows downward on screen.
 
-    The thumb folds sideways rather than down, so it is judged left/right
-    instead, and which way depends on the hand. Note the frame is mirrored for
-    display, which flips what "Left" and "Right" mean - handedness here should
-    be whatever the tracker reported for the same frame you are reading.
+    The thumb folds sideways rather than down, so it is judged left to right
+    instead. Which direction counts as extended depends both on the hand and
+    on whether the picture is mirrored, so both are taken into account.
+
+    `handedness` is the real hand, as returned by handedness_of.
     """
     four = [lm[t].y < lm[t - 2].y for t in FINGER_TIPS]
 
-    if handedness == "Right":
+    points_right = (handedness == "Right") != bool(mirrored)
+    if points_right:
         thumb = lm[THUMB_TIP].x > lm[THUMB_IP].x
     else:
         thumb = lm[THUMB_TIP].x < lm[THUMB_IP].x

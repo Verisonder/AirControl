@@ -50,12 +50,9 @@ def main() -> int:
                 for i, lm in enumerate(result.hand_landmarks):
                     H.draw_hand(frame, lm)
 
-                    # The tracker labels each hand; index matches hand_landmarks
-                    side = "Right"
-                    if i < len(result.handedness) and result.handedness[i]:
-                        side = result.handedness[i][0].category_name
+                    side = H.handedness_of(result, i, not args.no_mirror)
 
-                    up = H.fingers_up(lm, side)
+                    up = H.fingers_up(lm, side, not args.no_mirror)
                     shown = [n for n, u in zip(H.FINGER_NAMES, up) if u]
                     pinch = H.pinch_distance(lm)
 

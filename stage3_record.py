@@ -116,9 +116,7 @@ def main() -> int:
                 for i, lm in enumerate(result.hand_landmarks):
                     H.draw_hand(frame, lm)
 
-                    side = "Right"
-                    if i < len(result.handedness) and result.handedness[i]:
-                        side = result.handedness[i][0].category_name
+                    side = H.handedness_of(result, i, not args.no_mirror)
 
                     if first_lm is None:
                         first_lm, first_side = lm, side
