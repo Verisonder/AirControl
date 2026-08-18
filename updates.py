@@ -54,3 +54,35 @@ def newer_than_installed():
     if _parts(tag) > _parts(appsettings.version()):
         return tag, url
     return None
+
+
+def download(url: str, target, progress=None) -> bool:
+    """
+    Fetch the installer to `target`.
+
+    `progress` is called with (bytes_done, bytes_total). Total is 0 when the
+    server does not say, which happens often enough to handle rather than
+    assume away.
+    """
+    try:
+        request = urllib.request.Request(url, headers={"User-Agent": "AirControl"})
+        with urllib.request.urlopen(request, timeout=30) as response:
+            total = int(response.headers.get("Content-Length") or 0)
+            done = 0
+            with open(target, "wb") as out:
+                while True:
+                    chunk = response.read(64 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    done += len(chunk)
+                    if progress:
+                        progress(done, total)
+        return True
+    except Exception:
+        try:
+            import os
+            os.remove(target)
+        except OSError:
+            pass
+        return False

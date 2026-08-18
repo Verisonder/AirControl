@@ -8,7 +8,10 @@ poses, bind them, and turn the whole thing on and off.
     python gui.py
 """
 
+import os
+import subprocess
 import sys
+import tempfile
 import time
 import webbrowser
 from pathlib import Path
@@ -20,8 +23,8 @@ from PySide6.QtGui import QAction, QIcon, QImage, QPixmap, QFont
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
     QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMainWindow, QMenu, QMessageBox, QPushButton, QSystemTrayIcon, QVBoxLayout,
-    QWidget,
+    QMainWindow, QMenu, QMessageBox, QProgressDialog, QPushButton,
+    QSystemTrayIcon, QVBoxLayout, QWidget,
 )
 
 import actions
@@ -290,6 +293,23 @@ class UpdateCheck(QThread):
             self.found.emit(*result)
 
 
+class UpdateDownload(QThread):
+    """Fetches the installer, reporting how far along it is."""
+
+    progress = Signal(int, int)
+    done = Signal(str)          # path, or empty on failure
+
+    def __init__(self, url: str, tag: str):
+        super().__init__()
+        self.url = url
+        self.tag = tag
+
+    def run(self):
+        target = Path(tempfile.gettempdir()) / ("AirControl-%s.exe" % self.tag)
+        ok = updates.download(self.url, target, self.progress.emit)
+        self.done.emit(str(target) if ok else "")
+
+
 # --------------------------------------------------------------------------
 # Naming a captured pose
 # --------------------------------------------------------------------------
@@ -443,14 +463,12 @@ class SettingsDialog(QDialog):
         found = getattr(self, "_result", None)
 
         if found:
-            tag, url = found
-            answer = QMessageBox.question(
-                self, "Update available",
-                "Version %s is out. You have %s.\n\nOpen the download page?"
-                % (tag, appsettings.version()))
-            if answer == QMessageBox.Yes:
-                webbrowser.open(url)
+            tag, _ = found
             self.check_now.setText("Update to %s" % tag)
+            parent = self.parent()
+            if parent is not None:
+                self.accept()          # close settings, the main window takes over
+                parent.open_update()
         else:
             self.check_now.setText("You are up to date")
             QTimer.singleShot(3000, lambda: self.check_now.setText("Check for updates now"))
@@ -535,6 +553,7 @@ class MainWindow(QMainWindow):
 
         self.hotkey = None
         self.update_url = ""
+        self.update_tag = ""
         self.quitting = False
 
         # -- left: camera
@@ -854,12 +873,74 @@ class MainWindow(QMainWindow):
     @Slot(str, str)
     def update_available(self, tag, url):
         self.update_url = url
+        self.update_tag = tag
         self.update_btn.setText("Update to %s" % tag)
         self.update_btn.show()
 
     def open_update(self):
-        if self.update_url:
+        if not self.update_url:
+            return
+
+        if not self.update_url.lower().endswith(".exe"):
+            # No installer attached to that release - the page is all we have
             webbrowser.open(self.update_url)
+            return
+
+        answer = QMessageBox.question(
+            self, "Update AirControl",
+            "Download and install %s now?\n\n"
+            "AirControl will close while the installer runs, then reopen."
+            % self.update_tag)
+        if answer != QMessageBox.Yes:
+            return
+
+        self.progress = QProgressDialog("Downloading...", "Cancel", 0, 100, self)
+        self.progress.setWindowTitle("Update")
+        self.progress.setWindowModality(Qt.WindowModal)
+        self.progress.setMinimumDuration(0)
+        self.progress.setValue(0)
+
+        self.downloader = UpdateDownload(self.update_url, self.update_tag)
+        self.downloader.progress.connect(self.download_progress)
+        self.downloader.done.connect(self.download_done)
+        self.progress.canceled.connect(self.downloader.terminate)
+        self.downloader.start()
+
+    @Slot(int, int)
+    def download_progress(self, done, total):
+        if total:
+            self.progress.setValue(int(done * 100 / total))
+            self.progress.setLabelText("Downloading... %.0f of %.0f MB"
+                                       % (done / 1e6, total / 1e6))
+        else:
+            # Some servers do not send a length, so show movement not a fraction
+            self.progress.setRange(0, 0)
+            self.progress.setLabelText("Downloading... %.0f MB" % (done / 1e6))
+
+    @Slot(str)
+    def download_done(self, path):
+        self.progress.close()
+
+        if not path:
+            QMessageBox.warning(
+                self, "Update",
+                "The download did not finish.\n\n"
+                "You can get it by hand from the releases page.")
+            webbrowser.open(updates.PAGE)
+            return
+
+        try:
+            # Detached, because this process is about to end - and it has to,
+            # since the installer cannot replace files that are still open.
+            flags = 0
+            if sys.platform == "win32":
+                flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+            subprocess.Popen([path], close_fds=True, creationflags=flags)
+        except Exception as exc:
+            QMessageBox.warning(self, "Update", "Could not start the installer:\n\n%s" % exc)
+            return
+
+        self.really_quit()
 
     # -- from the engine --------------------------------------------------
 

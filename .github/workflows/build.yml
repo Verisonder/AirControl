@@ -57,6 +57,8 @@ jobs:
           $appver = (Get-Content VERSION).Trim()
           $iss = @"
           [Setup]
+          CloseApplications=yes
+          RestartApplications=no
           AppName=AirControl
           AppVersion=$appver
           DefaultDirName={localappdata}\AirControl
