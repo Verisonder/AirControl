@@ -342,6 +342,11 @@ class SettingsDialog(QDialog):
         self.check_updates = QCheckBox("Check for updates on start")
         self.check_updates.setChecked(settings["check_updates"])
 
+        self.check_now = QPushButton("Check for updates now")
+        self.check_now.clicked.connect(self._check_now)
+        self.version_label = QLabel("Installed: %s" % appsettings.version())
+        self.version_label.setStyleSheet("color:#8a8a8a; font-size:11px;")
+
         self.tolerance = self._spin(0.05, 0.6, 0.01, engine.tolerance)
         self.hold = self._spin(1, 30, 1, engine.hold_frames, decimals=0)
         self.cooldown = self._spin(0.1, 5.0, 0.1, engine.cooldown)
@@ -356,6 +361,8 @@ class SettingsDialog(QDialog):
         form.addRow("", self.close_to_tray)
         form.addRow("", self.start_minimised)
         form.addRow("", self.check_updates)
+        form.addRow("", self.check_now)
+        form.addRow("", self.version_label)
         form.addRow(self._divider())
         form.addRow("Match tolerance", self._with_hint(
             self.tolerance, "Lower is stricter. Raise it if a pose is not recognised."))
@@ -381,6 +388,39 @@ class SettingsDialog(QDialog):
         for box in (self.close_to_tray, self.start_minimised, self.check_updates):
             box.toggled.connect(self._apply)
         self.hotkey.editingFinished.connect(self._apply_hotkey)
+
+    def _check_now(self):
+        self.check_now.setEnabled(False)
+        self.check_now.setText("Checking...")
+
+        self._checker = UpdateCheck()
+        self._checker.found.connect(self._found)
+        self._checker.finished.connect(self._check_done)
+        self._checker.start()
+
+    @Slot(str, str)
+    def _found(self, tag, url):
+        self._result = (tag, url)
+        parent = self.parent()
+        if parent is not None:
+            parent.update_available(tag, url)
+
+    def _check_done(self):
+        self.check_now.setEnabled(True)
+        found = getattr(self, "_result", None)
+
+        if found:
+            tag, url = found
+            answer = QMessageBox.question(
+                self, "Update available",
+                "Version %s is out. You have %s.\n\nOpen the download page?"
+                % (tag, appsettings.version()))
+            if answer == QMessageBox.Yes:
+                webbrowser.open(url)
+            self.check_now.setText("Update to %s" % tag)
+        else:
+            self.check_now.setText("You are up to date")
+            QTimer.singleShot(3000, lambda: self.check_now.setText("Check for updates now"))
 
     def _divider(self):
         line = QLabel()
