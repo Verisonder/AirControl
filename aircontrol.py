@@ -75,7 +75,7 @@ class Mouse:
     SCROLL_DEADZONE = 0.07
 
     def __init__(self, margin: float, smoothing: float, frames: int, dry: bool,
-                 scroll_speed: float = 70.0):
+                 scroll_speed: float = 260.0):
         self.margin = margin
         self.smoothing = smoothing
         self.frames = frames
@@ -125,7 +125,12 @@ class Mouse:
             return 0
 
         push = offset - math.copysign(self.SCROLL_DEADZONE, offset)
-        self._scroll_owed += push * self.scroll_speed * elapsed
+
+        # Squared, keeping the sign. Small movements near the middle stay
+        # controllable while a full reach is properly quick - a straight line
+        # makes you choose between one or the other.
+        drive = push * abs(push) * 4.0
+        self._scroll_owed += drive * self.scroll_speed * elapsed
 
         # Whole clicks only; the remainder carries so slow scrolling still works
         clicks = int(self._scroll_owed)

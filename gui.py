@@ -69,7 +69,7 @@ class Engine(QThread):
         self.cooldown = 1.2
         self.margin = 0.33
         self.smoothing = 0.35
-        self.scroll_speed = 70.0
+        self.scroll_speed = 260.0
         self.active = False          # gestures actually do things
         self.capture_next = False    # grab the next pose seen
         self.preview = True          # window visible - draw and send frames
@@ -565,7 +565,7 @@ class SettingsDialog(QDialog):
         self.cooldown = self._spin(0.1, 5.0, 0.1, engine.cooldown)
         self.margin = self._spin(0.0, 0.45, 0.01, engine.margin)
         self.smoothing = self._spin(0.05, 1.0, 0.05, engine.smoothing)
-        self.scroll_speed = self._spin(10.0, 300.0, 5.0, engine.scroll_speed, decimals=0)
+        self.scroll_speed = self._spin(20.0, 1200.0, 20.0, engine.scroll_speed, decimals=0)
 
         form = QFormLayout()
         form.addRow("Shortcut", self._with_hint(
