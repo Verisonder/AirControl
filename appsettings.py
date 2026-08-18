@@ -15,6 +15,7 @@ PATH = gestures.STORE.with_name("settings.json")
 DEFAULTS = {
     "hotkey": "<ctrl>+<alt>+a",
     "start_minimised": False,
+    "start_active": False,
     "close_to_tray": True,
     "check_updates": True,
     "tolerance": 0.22,

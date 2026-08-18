@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 
 import actions
 import appsettings
+import autostart
 import gestures
 import hands as H
 import updates
@@ -520,8 +521,17 @@ class SettingsDialog(QDialog):
         self.close_to_tray = QCheckBox("Keep running when the window is closed")
         self.close_to_tray.setChecked(settings["close_to_tray"])
 
+        self.start_with_windows = QCheckBox("Start when Windows starts")
+        self.start_with_windows.setChecked(autostart.enabled())
+        if not autostart.SUPPORTED:
+            self.start_with_windows.setEnabled(False)
+            self.start_with_windows.setText("Start when Windows starts (Windows only)")
+
         self.start_minimised = QCheckBox("Start hidden in the tray")
         self.start_minimised.setChecked(settings["start_minimised"])
+
+        self.start_active = QCheckBox("Start with gestures already on")
+        self.start_active.setChecked(settings["start_active"])
 
         self.check_updates = QCheckBox("Check for updates on start")
         self.check_updates.setChecked(settings["check_updates"])
@@ -543,7 +553,12 @@ class SettingsDialog(QDialog):
             "Turns gestures on and off from anywhere. Click, then press the "
             "keys you want. Needs at least one of Ctrl, Alt or Shift."))
         form.addRow("", self.close_to_tray)
+        form.addRow("", self.start_with_windows)
         form.addRow("", self.start_minimised)
+        form.addRow("", self.start_active)
+        form.addRow(self._hint(
+            "With gestures on at startup the camera opens straight away, and the "
+            "light beside it stays on until you turn them off."))
         form.addRow("", self.check_updates)
         form.addRow("", self.check_now)
         form.addRow("", self.version_label)
@@ -569,8 +584,10 @@ class SettingsDialog(QDialog):
 
         for w in (self.tolerance, self.hold, self.cooldown, self.margin, self.smoothing):
             w.valueChanged.connect(self._apply)
-        for box in (self.close_to_tray, self.start_minimised, self.check_updates):
+        for box in (self.close_to_tray, self.start_minimised,
+                    self.start_active, self.check_updates):
             box.toggled.connect(self._apply)
+        self.start_with_windows.toggled.connect(self._apply_autostart)
 
 
     def _check_now(self):
@@ -603,6 +620,25 @@ class SettingsDialog(QDialog):
         else:
             self.check_now.setText("You are up to date")
             QTimer.singleShot(3000, lambda: self.check_now.setText("Check for updates now"))
+
+    @Slot(bool)
+    def _apply_autostart(self, on):
+        if autostart.set_enabled(on):
+            return
+        # Failed - put the box back rather than showing a state that is not real
+        self.start_with_windows.blockSignals(True)
+        self.start_with_windows.setChecked(autostart.enabled())
+        self.start_with_windows.blockSignals(False)
+        QMessageBox.warning(
+            self, "Startup",
+            "Windows would not let that be changed.\n\n"
+            "Some security software blocks writes to the startup list.")
+
+    def _hint(self, text):
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setStyleSheet("color:#8a8a8a; font-size:11px;")
+        return label
 
     def _divider(self):
         line = QLabel()
@@ -652,6 +688,7 @@ class SettingsDialog(QDialog):
             "smoothing": self.engine.smoothing,
             "close_to_tray": self.close_to_tray.isChecked(),
             "start_minimised": self.start_minimised.isChecked(),
+            "start_active": self.start_active.isChecked(),
             "check_updates": self.check_updates.isChecked(),
         })
         appsettings.save(self.settings)
@@ -774,6 +811,10 @@ class MainWindow(QMainWindow):
         self.refresh()
         self.engine.start(QThread.HighPriority)
         self.start_hotkey(self.settings["hotkey"])
+
+        if self.settings["start_active"]:
+            self.toggle.setChecked(True)
+            self.toggle_active(True)
 
         if self.settings["check_updates"]:
             self.updater = UpdateCheck()
