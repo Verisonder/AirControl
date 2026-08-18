@@ -69,11 +69,13 @@ class Trigger:
 class Mouse:
     """Cursor and buttons, driven by a held pose."""
 
-    def __init__(self, margin: float, smoothing: float, frames: int, dry: bool):
+    def __init__(self, margin: float, smoothing: float, frames: int, dry: bool,
+                 scroll_speed: float = 45.0):
         self.margin = margin
         self.smoothing = smoothing
         self.frames = frames
         self.dry = dry
+        self.scroll_speed = scroll_speed
         self.w, self.h = pyautogui.size() if HAVE_MOUSE else (1920, 1080)
         self.x, self.y = self.w / 2, self.h / 2
         self.have_fix = False
@@ -81,7 +83,35 @@ class Mouse:
         self.down_since = 0.0
         self._want = None
         self._streak = 0
+        self._scroll_from = None
+        self._scroll_owed = 0.0
         self.event = ""
+
+    def scroll(self, ny: float) -> int:
+        """
+        Scroll by how far the hand has moved since the last frame.
+
+        Relative rather than absolute, so it behaves like dragging the page:
+        keep moving and it keeps scrolling, stop and it stops. An absolute
+        mapping would snap the page to wherever the hand happened to be when
+        the pose was recognised.
+        """
+        if self._scroll_from is None:
+            self._scroll_from = ny
+            self._scroll_owed = 0.0
+            return 0
+
+        # Screen y grows downward, so a hand moving up is a negative delta and
+        # should scroll the page up, which pyautogui counts as positive
+        self._scroll_owed += (self._scroll_from - ny) * self.scroll_speed
+        self._scroll_from = ny
+
+        # Whole clicks only; the remainder carries so slow movement still works
+        clicks = int(self._scroll_owed)
+        if clicks and not self.dry and HAVE_MOUSE:
+            pyautogui.scroll(clicks)
+        self._scroll_owed -= clicks
+        return clicks
 
     def move_to(self, nx: float, ny: float):
         """Feed a normalised hand position. Returns screen pixels."""
@@ -110,6 +140,7 @@ class Mouse:
         self.release()
         self.have_fix = False
         self._want, self._streak = None, 0
+        self._scroll_from = None
 
     def hold(self, action) -> None:
         """Feed the mouse action seen this frame, or None."""
@@ -244,7 +275,13 @@ def main() -> int:
                     if mouse_lm is None:
                         # Pose gone: let go rather than leaving a button stuck down
                         mouse.lost()
+                    elif mouse_action == "mouse:scroll":
+                        mouse.hold(None)
+                        clicks = mouse.scroll(mouse_lm[PALM].y)
+                        lines.append("scrolling %s" % ("up" if clicks > 0 else
+                                                       "down" if clicks < 0 else "-"))
                     else:
+                        mouse._scroll_from = None
                         mouse.hold(mouse_action)
                         sx, sy = mouse.move_to(mouse_lm[PALM].x, mouse_lm[PALM].y)
                         lines.append("cursor %d, %d%s"

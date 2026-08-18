@@ -69,6 +69,7 @@ class Engine(QThread):
         self.cooldown = 1.2
         self.margin = 0.33
         self.smoothing = 0.35
+        self.scroll_speed = 45.0
         self.active = False          # gestures actually do things
         self.capture_next = False    # grab the next pose seen
         self.preview = True          # window visible - draw and send frames
@@ -153,6 +154,7 @@ class Engine(QThread):
                     trigger.cooldown = self.cooldown
                     mouse.margin = self.margin
                     mouse.smoothing = self.smoothing
+                    mouse.scroll_speed = self.scroll_speed
 
                     stamp = int((time.time() - started) * 1000)
                     result = landmarker.detect_for_video(H.to_image(frame), stamp)
@@ -197,7 +199,15 @@ class Engine(QThread):
                     if self.active:
                         if mouse_lm is None:
                             mouse.lost()
+                        elif mouse_action == "mouse:scroll":
+                            mouse.hold(None)
+                            mouse.scroll(mouse_lm[PALM].y)
+                            if showing:
+                                px = int(mouse_lm[PALM].x * w)
+                                py = int(mouse_lm[PALM].y * h)
+                                cv2.circle(frame, (px, py), 12, (0, 200, 255), 2)
                         else:
+                            mouse._scroll_from = None
                             mouse.hold(mouse_action)
                             mouse.move_to(mouse_lm[PALM].x, mouse_lm[PALM].y)
                             if showing:
@@ -546,6 +556,7 @@ class SettingsDialog(QDialog):
         self.cooldown = self._spin(0.1, 5.0, 0.1, engine.cooldown)
         self.margin = self._spin(0.0, 0.45, 0.01, engine.margin)
         self.smoothing = self._spin(0.05, 1.0, 0.05, engine.smoothing)
+        self.scroll_speed = self._spin(5.0, 200.0, 5.0, engine.scroll_speed, decimals=0)
 
         form = QFormLayout()
         form.addRow("Shortcut", self._with_hint(
@@ -573,6 +584,9 @@ class SettingsDialog(QDialog):
             self.margin, "Higher means a smaller box, so less hand movement."))
         form.addRow("Cursor smoothing", self._with_hint(
             self.smoothing, "Lower is steadier but slower to respond."))
+        form.addRow("Scroll speed", self._with_hint(
+            self.scroll_speed, "How far a scroll gesture moves the page for a "
+                               "given hand movement."))
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.accept)
@@ -582,7 +596,8 @@ class SettingsDialog(QDialog):
         layout.addLayout(form)
         layout.addWidget(buttons)
 
-        for w in (self.tolerance, self.hold, self.cooldown, self.margin, self.smoothing):
+        for w in (self.tolerance, self.hold, self.cooldown, self.margin,
+                  self.smoothing, self.scroll_speed):
             w.valueChanged.connect(self._apply)
         for box in (self.close_to_tray, self.start_minimised,
                     self.start_active, self.check_updates):
@@ -679,6 +694,7 @@ class SettingsDialog(QDialog):
         self.engine.cooldown = self.cooldown.value()
         self.engine.margin = self.margin.value()
         self.engine.smoothing = self.smoothing.value()
+        self.engine.scroll_speed = self.scroll_speed.value()
 
         self.settings.update({
             "tolerance": self.engine.tolerance,
@@ -686,6 +702,7 @@ class SettingsDialog(QDialog):
             "cooldown": self.engine.cooldown,
             "margin": self.engine.margin,
             "smoothing": self.engine.smoothing,
+            "scroll_speed": self.engine.scroll_speed,
             "close_to_tray": self.close_to_tray.isChecked(),
             "start_minimised": self.start_minimised.isChecked(),
             "start_active": self.start_active.isChecked(),
@@ -713,6 +730,7 @@ class MainWindow(QMainWindow):
         self.engine.cooldown = self.settings["cooldown"]
         self.engine.margin = self.settings["margin"]
         self.engine.smoothing = self.settings["smoothing"]
+        self.engine.scroll_speed = self.settings["scroll_speed"]
         self.engine.frame_ready.connect(self.show_frame)
         self.engine.status.connect(self.show_status)
         self.engine.fired.connect(self.show_fired)

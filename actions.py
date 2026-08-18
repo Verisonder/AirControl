@@ -10,6 +10,7 @@ Actions are written as plain strings so they can live in gestures.json:
     mouse:move             while held, the cursor follows this hand
     mouse:left             while held, the left button is down
     mouse:right            while held, the right button is down
+    mouse:scroll           while held, moving the hand up or down scrolls
     none                   do nothing (useful while testing)
 
 The mouse ones are not pressed like a key - they describe a hand pose that the
@@ -47,10 +48,11 @@ PRESETS = {
     "move cursor":  "mouse:move",
     "left click":   "mouse:left",
     "right click":  "mouse:right",
+    "scroll":       "mouse:scroll",
 }
 
 # Actions that only mean something inside mouse mode
-MOUSE_ACTIONS = ("mouse:move", "mouse:left", "mouse:right")
+MOUSE_ACTIONS = ("mouse:move", "mouse:left", "mouse:right", "mouse:scroll")
 
 
 def describe(action: str) -> str:

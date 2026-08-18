@@ -23,6 +23,7 @@ DEFAULTS = {
     "cooldown": 1.2,
     "margin": 0.33,
     "smoothing": 0.35,
+    "scroll_speed": 45.0,
 }
 
 
