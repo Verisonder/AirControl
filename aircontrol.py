@@ -70,9 +70,9 @@ class Trigger:
 class Mouse:
     """Cursor, buttons and scrolling, driven by a held pose."""
 
-    # How far the hand must leave the middle before scrolling starts, as a
-    # fraction of the frame height
-    SCROLL_DEADZONE = 0.05
+    # How far the hand must leave the middle of the frame before scrolling
+    # starts, as a fraction of the frame height
+    SCROLL_DEADZONE = 0.07
 
     def __init__(self, margin: float, smoothing: float, frames: int, dry: bool,
                  scroll_speed: float = 70.0):
@@ -88,29 +88,29 @@ class Mouse:
         self.down_since = 0.0
         self._want = None
         self._streak = 0
-        self._scroll_from = None
+        self._scroll_time = 0.0
         self._scroll_owed = 0.0
         self._scroll_time = 0.0
         self.event = ""
 
     def scroll(self, ny: float) -> int:
         """
-        Keep scrolling while the hand is held away from where the pose started.
+        Scroll while the hand is held above or below the middle of the frame.
 
-        Where the hand first appears becomes the middle. Hold it above that and
-        the page keeps moving up for as long as you hold it; the further out,
-        the faster. Come back to the middle and it stops.
+        Above the middle scrolls up, below scrolls down, and the further out the
+        faster it goes. Hold it there and it keeps going.
 
-        The earlier version scrolled by how far the hand moved between frames,
-        which meant it only moved while the hand did - a held pose did nothing
-        and you had to keep sweeping downwards to read anything.
+        The middle is the middle of the picture, deliberately - not wherever the
+        hand happened to be when the pose was first recognised. An anchor there
+        looked reasonable and was useless in practice: any flicker in matching
+        reset it to the hand's current position, which is an offset of zero, so
+        holding a pose steadily produced nothing at all.
         """
         now = time.time()
 
-        if self._scroll_from is None:
-            self._scroll_from = ny          # the middle, set where the pose began
-            self._scroll_owed = 0.0
+        if self._scroll_time == 0.0:
             self._scroll_time = now
+            self._scroll_owed = 0.0
             return 0
 
         # Clamped, so a stall or a slow frame cannot dump a huge jump at once
@@ -118,9 +118,9 @@ class Mouse:
         self._scroll_time = now
 
         # Screen y grows downward, so a hand above the middle is positive here
-        offset = self._scroll_from - ny
+        offset = 0.5 - ny
 
-        # A dead middle, or the page creeps while you try to hold still
+        # A dead band across the middle, or the page creeps while holding still
         if abs(offset) <= self.SCROLL_DEADZONE:
             return 0
 
@@ -161,7 +161,7 @@ class Mouse:
         self.release()
         self.have_fix = False
         self._want, self._streak = None, 0
-        self._scroll_from = None
+        self._scroll_time = 0.0
 
     def hold(self, action) -> None:
         """Feed the mouse action seen this frame, or None."""
@@ -302,7 +302,7 @@ def main() -> int:
                         lines.append("scrolling %s" % ("up" if clicks > 0 else
                                                        "down" if clicks < 0 else "-"))
                     else:
-                        mouse._scroll_from = None
+                        mouse._scroll_time = 0.0
                         mouse.hold(mouse_action)
                         sx, sy = mouse.move_to(mouse_lm[PALM].x, mouse_lm[PALM].y)
                         lines.append("cursor %d, %d%s"

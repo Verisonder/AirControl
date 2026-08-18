@@ -201,13 +201,22 @@ class Engine(QThread):
                             mouse.lost()
                         elif mouse_action == "mouse:scroll":
                             mouse.hold(None)
-                            mouse.scroll(mouse_lm[PALM].y)
+                            clicks = mouse.scroll(mouse_lm[PALM].y)
                             if showing:
                                 px = int(mouse_lm[PALM].x * w)
                                 py = int(mouse_lm[PALM].y * h)
-                                cv2.circle(frame, (px, py), 12, (0, 200, 255), 2)
+                                cv2.circle(frame, (px, py), 14, (255, 120, 0), 3)
+                                # The dead band, so it is obvious where nothing
+                                # happens and which way to move to get going
+                                band = int(Mouse.SCROLL_DEADZONE * h)
+                                mid = h // 2
+                                cv2.line(frame, (0, mid - band), (w, mid - band), (90, 90, 90), 1)
+                                cv2.line(frame, (0, mid + band), (w, mid + band), (90, 90, 90), 1)
+                                if clicks:
+                                    cv2.putText(frame, "scrolling %s" % ("up" if clicks > 0 else "down"),
+                                                (12, mid), cv2.FONT_HERSHEY_SIMPLEX, 0.7,
+                                                (255, 120, 0), 2, cv2.LINE_AA)
                         else:
-                            mouse._scroll_from = None
                             mouse.hold(mouse_action)
                             mouse.move_to(mouse_lm[PALM].x, mouse_lm[PALM].y)
                             if showing:
@@ -585,10 +594,10 @@ class SettingsDialog(QDialog):
         form.addRow("Cursor smoothing", self._with_hint(
             self.smoothing, "Lower is steadier but slower to respond."))
         form.addRow("Scroll speed", self._with_hint(
-            self.scroll_speed, "Hold the pose above or below where it started "
-                               "and the page keeps moving. Scrolling lands "
-                               "wherever the cursor is, not where you are "
-                               "looking."))
+            self.scroll_speed, "Hold the scroll pose above the middle of the "
+                               "picture to scroll up, below it to scroll down. "
+                               "Scrolling lands wherever the cursor is, not "
+                               "where you are looking."))
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.accept)
