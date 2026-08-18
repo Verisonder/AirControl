@@ -81,6 +81,11 @@ jobs:
           Name: "{userprograms}\Repair AirControl"; Filename: "{app}\pythonw.exe"; Parameters: """{app}\setup_deps.py"" --quiet"; IconFilename: "{app}\aircontrol.ico"; WorkingDir: "{app}"
           [Run]
           Filename: "{app}\pythonw.exe"; Parameters: """{app}\launch.py"""; Description: "Start AirControl"; Flags: nowait postinstall skipifsilent
+          [UninstallDelete]
+          ; Inno only tracks what it copied in. The downloaded libraries, the
+          ; hand model and the compiled caches all appear afterwards, so the
+          ; whole folder has to go or several hundred megabytes are left behind.
+          Type: filesandordirs; Name: "{app}"
           [Code]
           procedure CurStepChanged(CurStep: TSetupStep);
           var
@@ -101,6 +106,24 @@ jobs:
               finally
                 WizardForm.ProgressGauge.Style := npbstNormal;
                 WizardForm.FilenameLabel.Caption := '';
+              end;
+            end;
+          end;
+          procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+          var
+            DataDir: String;
+          begin
+            if CurUninstallStep = usPostUninstall then
+            begin
+              DataDir := ExpandConstant('{userappdata}\AirControl');
+              if DirExists(DataDir) then
+              begin
+                // Recorded gestures are the user's own work, so ask rather than
+                // quietly throwing them away on what might be a reinstall.
+                if MsgBox('Remove your recorded gestures as well?' + #13#10#13#10 +
+                          'Choose No if you plan to install AirControl again.',
+                          mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+                  DelTree(DataDir, True, True, True);
               end;
             end;
           end;
