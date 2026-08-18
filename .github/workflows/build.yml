@@ -61,12 +61,16 @@ jobs:
           AppVersion=$appver
           DefaultDirName={localappdata}\AirControl
           DisableProgramGroupPage=yes
+          DisableWelcomePage=no
           PrivilegesRequired=lowest
           OutputBaseFilename=AirControl-Setup
           SetupIconFile=aircontrol.ico
           UninstallDisplayIcon={app}\aircontrol.ico
           Compression=lzma2
           SolidCompression=yes
+          WizardStyle=modern
+          WizardSizePercent=100
+          WizardResizable=yes
           [Tasks]
           Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"
           [Files]
@@ -76,8 +80,30 @@ jobs:
           Name: "{userprograms}\AirControl"; Filename: "{app}\pythonw.exe"; Parameters: """{app}\launch.py"""; IconFilename: "{app}\aircontrol.ico"; WorkingDir: "{app}"
           Name: "{userprograms}\Repair AirControl"; Filename: "{app}\pythonw.exe"; Parameters: """{app}\setup_deps.py"" --quiet"; IconFilename: "{app}\aircontrol.ico"; WorkingDir: "{app}"
           [Run]
-          Filename: "{app}\pythonw.exe"; Parameters: """{app}\setup_deps.py"" --quiet"; StatusMsg: "Downloading libraries (about 400 MB). This can take several minutes..."; Flags: runhidden waituntilterminated
           Filename: "{app}\pythonw.exe"; Parameters: """{app}\launch.py"""; Description: "Start AirControl"; Flags: nowait postinstall skipifsilent
+          [Code]
+          procedure CurStepChanged(CurStep: TSetupStep);
+          var
+            ResultCode: Integer;
+          begin
+            if CurStep = ssPostInstall then
+            begin
+              WizardForm.StatusLabel.Caption :=
+                'Downloading libraries (about 400 MB). This can take several minutes...';
+              WizardForm.FilenameLabel.Caption := 'Nothing is frozen - the bar cannot show progress for this.';
+              // The bar tracks file copying, which is already finished. Sweeping
+              // it says "still working" instead of sitting at a misleading 100%.
+              WizardForm.ProgressGauge.Style := npbstMarquee;
+              try
+                Exec(ExpandConstant('{app}\pythonw.exe'),
+                     ExpandConstant('"{app}\setup_deps.py" --quiet'),
+                     ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
+              finally
+                WizardForm.ProgressGauge.Style := npbstNormal;
+                WizardForm.FilenameLabel.Caption := '';
+              end;
+            end;
+          end;
           "@
           Set-Content -Path aircontrol.iss -Value $iss -Encoding ASCII
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" aircontrol.iss
