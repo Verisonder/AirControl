@@ -53,6 +53,7 @@ class Engine(QThread):
         self.smoothing = 0.35
         self.active = False          # gestures actually do things
         self.capture_next = False    # grab the next pose seen
+        self.preview = True          # window visible - draw and send frames
 
         self.captured = None         # normalised pose waiting to be named
         self.captured_hand = "Right"
@@ -99,8 +100,11 @@ class Engine(QThread):
                     first_lm, first_side = None, "Right"
                     seen = []
 
+                    showing = self.preview
+
                     for i, lm in enumerate(result.hand_landmarks):
-                        H.draw_hand(frame, lm)
+                        if showing:
+                            H.draw_hand(frame, lm)
                         side = H.handedness_of(result, i, True)
 
                         if first_lm is None:
@@ -131,10 +135,11 @@ class Engine(QThread):
                         else:
                             mouse.hold(mouse_action)
                             mouse.move_to(mouse_lm[PALM].x, mouse_lm[PALM].y)
-                            px = int(mouse_lm[PALM].x * w)
-                            py = int(mouse_lm[PALM].y * h)
-                            cv2.circle(frame, (px, py), 12,
-                                       (0, 0, 255) if mouse.button else (255, 200, 0), 2)
+                            if showing:
+                                px = int(mouse_lm[PALM].x * w)
+                                py = int(mouse_lm[PALM].y * h)
+                                cv2.circle(frame, (px, py), 12,
+                                           (0, 0, 255) if mouse.button else (255, 200, 0), 2)
 
                         name = trigger.update(key_gesture["name"] if key_gesture else None)
                         if name:
@@ -142,25 +147,30 @@ class Engine(QThread):
                             actions.run(action)
                             self.fired.emit("%s  ->  %s" % (name, actions.describe(action)))
 
-                        if key_gesture and trigger.progress < 1.0:
+                        if showing and key_gesture and trigger.progress < 1.0:
                             bar = int(trigger.progress * (w - 24))
                             cv2.rectangle(frame, (12, h - 18), (12 + bar, h - 10),
                                           (0, 220, 120), -1)
                     else:
                         mouse.lost()
 
-                    if any(g.get("action") in actions.MOUSE_ACTIONS
-                           for g in self.library.items):
-                        m = self.margin
-                        cv2.rectangle(frame, (int(m * w), int(m * h)),
-                                      (int((1 - m) * w), int((1 - m) * h)), (90, 90, 90), 1)
+                    # Hidden window: skip the picture entirely. Converting and
+                    # sending frames nobody can see is most of the cost, and the
+                    # queued signals pile up while the interface is throttled.
+                    if showing:
+                        if any(g.get("action") in actions.MOUSE_ACTIONS
+                               for g in self.library.items):
+                            m = self.margin
+                            cv2.rectangle(frame, (int(m * w), int(m * h)),
+                                          (int((1 - m) * w), int((1 - m) * h)), (90, 90, 90), 1)
 
-                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    image = QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
-                    self.frame_ready.emit(image)
-
-                    self.status.emit("%.0f fps    %s" % (
-                        fps.tick(), "   ".join(seen) if seen else "no hand"))
+                        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        image = QImage(rgb.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+                        self.frame_ready.emit(image)
+                        self.status.emit("%.0f fps    %s" % (
+                            fps.tick(), "   ".join(seen) if seen else "no hand"))
+                    else:
+                        fps.tick()
 
             cam.release()
             mouse.release()
@@ -208,8 +218,10 @@ class RecordDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
+        self.headline = QLabel("Captured a %s hand." % hand_seen.lower())
+
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Captured a %s hand." % hand_seen.lower()))
+        layout.addWidget(self.headline)
         layout.addLayout(form)
         layout.addWidget(buttons)
 
@@ -337,7 +349,7 @@ class MainWindow(QMainWindow):
         self.record_btn = QPushButton("Record a gesture")
         self.record_btn.clicked.connect(self.record)
 
-        self.rebind_btn = QPushButton("Change what it does")
+        self.rebind_btn = QPushButton("Edit")
         self.rebind_btn.clicked.connect(self.rebind)
 
         self.delete_btn = QPushButton("Delete")
@@ -377,7 +389,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(holder)
 
         self.refresh()
-        self.engine.start()
+        self.engine.start(QThread.HighPriority)
 
         if not HAVE_MOUSE:
             self.statusBar().showMessage(
@@ -454,19 +466,46 @@ class MainWindow(QMainWindow):
         if not name:
             return
 
+        current = next((g for g in self.library.items if g["name"] == name), None)
+        if current is None:
+            return
+
         dialog = RecordDialog("saved", self)
-        dialog.setWindowTitle("Change what it does")
+        dialog.setWindowTitle("Edit gesture")
+        dialog.headline.setText("Editing %r. The pose itself is unchanged." % name)
         dialog.name.setText(name)
-        dialog.name.setEnabled(False)
+
+        index = dialog.hand.findData(current.get("hand", "any"))
+        if index >= 0:
+            dialog.hand.setCurrentIndex(index)
+
+        action_now = current.get("action", "none")
+        index = dialog.action.findData(action_now)
+        if index >= 0:
+            dialog.action.setCurrentIndex(index)
+        else:
+            dialog.action.setCurrentIndex(dialog.action.count() - 1)
+            dialog.custom.setText(action_now)
+
         if dialog.exec() != QDialog.Accepted:
             return
 
-        _, hand, action = dialog.values()
-        for g in self.library.items:
-            if g["name"] == name:
-                g["action"] = action
-                g["hand"] = hand
-                break
+        new_name, hand, action = dialog.values()
+        if not new_name:
+            QMessageBox.information(self, "Needs a name", "Give the gesture a name.")
+            return
+
+        clash = new_name.lower() != name.lower() and any(
+            g["name"].lower() == new_name.lower() for g in self.library.items)
+        if clash:
+            QMessageBox.information(
+                self, "Name taken",
+                "Another gesture is already called %r." % new_name)
+            return
+
+        current["name"] = new_name
+        current["hand"] = hand
+        current["action"] = action
         self.library.save()
         self.refresh()
 
@@ -503,6 +542,20 @@ class MainWindow(QMainWindow):
     @Slot(str)
     def show_failure(self, text):
         QMessageBox.critical(self, "Camera", text)
+
+    def changeEvent(self, event):
+        # Minimised windows get no repaints, so stop producing pictures for one
+        if event.type() == event.Type.WindowStateChange:
+            self.engine.preview = not self.isMinimized()
+        super().changeEvent(event)
+
+    def hideEvent(self, event):
+        self.engine.preview = False
+        super().hideEvent(event)
+
+    def showEvent(self, event):
+        self.engine.preview = True
+        super().showEvent(event)
 
     def closeEvent(self, event):
         self.engine.active = False
