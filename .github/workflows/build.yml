@@ -69,8 +69,6 @@ jobs:
           Compression=lzma2
           SolidCompression=yes
           WizardStyle=modern
-          WizardSizePercent=100
-          WizardResizable=yes
           [Tasks]
           Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"
           [Files]
