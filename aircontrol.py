@@ -70,7 +70,7 @@ class Mouse:
     """Cursor and buttons, driven by a held pose."""
 
     def __init__(self, margin: float, smoothing: float, frames: int, dry: bool,
-                 scroll_speed: float = 45.0):
+                 scroll_speed: float = 160.0):
         self.margin = margin
         self.smoothing = smoothing
         self.frames = frames

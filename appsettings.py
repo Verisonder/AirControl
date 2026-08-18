@@ -23,7 +23,7 @@ DEFAULTS = {
     "cooldown": 1.2,
     "margin": 0.33,
     "smoothing": 0.35,
-    "scroll_speed": 45.0,
+    "scroll_speed": 160.0,
 }
 
 
@@ -34,6 +34,12 @@ def load() -> dict:
             values.update(json.loads(PATH.read_text(encoding="utf-8")))
         except (json.JSONDecodeError, OSError):
             pass                       # a damaged file falls back to defaults
+
+    # The first scroll default was far too gentle to notice. Anyone who never
+    # touched the setting gets the new one rather than being stuck with it.
+    if values.get("scroll_speed", 0) <= 45.0:
+        values["scroll_speed"] = DEFAULTS["scroll_speed"]
+
     return values
 
 

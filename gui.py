@@ -69,7 +69,7 @@ class Engine(QThread):
         self.cooldown = 1.2
         self.margin = 0.33
         self.smoothing = 0.35
-        self.scroll_speed = 45.0
+        self.scroll_speed = 160.0
         self.active = False          # gestures actually do things
         self.capture_next = False    # grab the next pose seen
         self.preview = True          # window visible - draw and send frames
@@ -556,7 +556,7 @@ class SettingsDialog(QDialog):
         self.cooldown = self._spin(0.1, 5.0, 0.1, engine.cooldown)
         self.margin = self._spin(0.0, 0.45, 0.01, engine.margin)
         self.smoothing = self._spin(0.05, 1.0, 0.05, engine.smoothing)
-        self.scroll_speed = self._spin(5.0, 200.0, 5.0, engine.scroll_speed, decimals=0)
+        self.scroll_speed = self._spin(10.0, 800.0, 10.0, engine.scroll_speed, decimals=0)
 
         form = QFormLayout()
         form.addRow("Shortcut", self._with_hint(
@@ -586,7 +586,8 @@ class SettingsDialog(QDialog):
             self.smoothing, "Lower is steadier but slower to respond."))
         form.addRow("Scroll speed", self._with_hint(
             self.scroll_speed, "How far a scroll gesture moves the page for a "
-                               "given hand movement."))
+                               "given hand movement. Scrolling lands wherever "
+                               "the cursor is, not where you are looking."))
 
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.rejected.connect(self.accept)
